@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
         theme: localStorage.getItem('ce_theme') || 'dark',
         chartRange: '1h',
         lastSeenTimestamp: null,
-        pollIntervalMs: 5000,
+        lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
+        pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
         chartInstance: null,
         pollTimer: null,
         secondsTickerTimer: null,
@@ -243,6 +244,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Helper trigger animasi flash angka berubah
+    function pulseOnChange(element, newValue) {
+        if (!element) return;
+        if (element.textContent !== newValue) {
+            element.textContent = newValue;
+            element.classList.remove('val-updated');
+            // Trigger reflow to restart animation
+            void element.offsetWidth;
+            element.classList.add('val-updated');
+        }
+    }
+
     // --------------------------------------------------------------------------
     // 5. FETCH DATA REALTIME DARI API (POLLING)
     // --------------------------------------------------------------------------
@@ -276,8 +289,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const th = json.thresholds || {};
 
                 if (tel) {
+                    // Deteksi jika ada rekaman baru masuk: langsung refresh grafik & tabel tanpa delay!
+                    const isNewRecord = (state.lastTelemetryId !== null && tel.id !== state.lastTelemetryId);
+                    state.lastTelemetryId = tel.id;
+
                     if (el.valTemp) {
-                        el.valTemp.textContent = tel.temperature !== null ? tel.temperature.toFixed(2) : '--';
+                        const newTemp = tel.temperature !== null ? tel.temperature.toFixed(2) : '--';
+                        pulseOnChange(el.valTemp, newTemp);
                     }
                     if (el.badgeTemp && el.footerTemp) {
                         if (tel.temperature !== null) {
@@ -294,7 +312,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     if (el.valPh) {
-                        el.valPh.textContent = tel.ph !== null ? tel.ph.toFixed(2) : '--';
+                        const newPh = tel.ph !== null ? tel.ph.toFixed(2) : '--';
+                        pulseOnChange(el.valPh, newPh);
                     }
                     if (el.badgePh && el.footerPh) {
                         if (tel.ph !== null) {
@@ -311,7 +330,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     if (el.valAlcohol) {
-                        el.valAlcohol.textContent = tel.alcohol !== null ? tel.alcohol.toFixed(1) : '--';
+                        const newAlcohol = tel.alcohol !== null ? tel.alcohol.toFixed(1) : '--';
+                        pulseOnChange(el.valAlcohol, newAlcohol);
                     }
                     if (el.badgeAlcohol && el.footerAlcohol) {
                         if (tel.alcohol !== null) {
@@ -328,7 +348,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (el.valRssi) {
                         const rssiVal = tel.rssi !== null ? tel.rssi : null;
-                        el.valRssi.textContent = rssiVal !== null ? `${rssiVal}` : '--';
+                        const newRssi = rssiVal !== null ? `${rssiVal}` : '--';
+                        pulseOnChange(el.valRssi, newRssi);
+
                         // Update status chip with signal quality
                         const chip = document.getElementById('statusChip');
                         if (chip) {
@@ -341,6 +363,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (el.valFirmware) {
                         el.valFirmware.textContent = `v${tel.firmware_ver || '1.0.0'}`;
+                    }
+
+                    // Jika ada data baru dari ESP32, LANGSUNG refresh grafik & tabel seketika!
+                    if (isNewRecord) {
+                        fetchHistoryData();
                     }
                 }
             }
@@ -404,7 +431,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         el.historyTableBody.innerHTML = recentRows.map(row => `
             <tr>
-                <td><strong>${escapeHtml(row.time)}</strong> <span style="font-size:0.7rem; color:var(--text-muted);">${escapeHtml(row.datetime.split(' ')[0])}</span></td>
+                <td>
+                    <strong>${escapeHtml(row.time)}</strong>
+                    <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
+                </td>
                 <td><span style="color:var(--pink); font-weight:700;">${row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
                 <td><span style="color:var(--teal); font-weight:700;">${row.ph !== null ? row.ph : '--'}</span></td>
                 <td><span style="color:var(--violet); font-weight:700;">${row.alcohol !== null ? row.alcohol : '--'}</span></td>
@@ -522,12 +552,20 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchLatestData();
     fetchHistoryData();
 
-    // Polling data realtime dari server tiap 5 detik
+    // Polling data realtime dari server tiap 3 detik
     state.pollTimer = setInterval(fetchLatestData, state.pollIntervalMs);
 
-    // Refresh grafik tiap 15 detik
-    setInterval(fetchHistoryData, 15000);
+    // Refresh grafik & tabel otomatis tiap 6 detik (fallback jika tidak ada push baru)
+    setInterval(fetchHistoryData, 6000);
 
     // Ticker hitungan detik update tiap 1 detik
     state.secondsTickerTimer = setInterval(updateRelativeTimeCounter, 1000);
+
+    // Auto-sync instan saat user membuka kembali tab browser (misal setelah switch tab)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            fetchLatestData();
+            fetchHistoryData();
+        }
+    });
 });

@@ -55,14 +55,17 @@ switch ($range) {
 }
 
 try {
-    // Ambil data historis
+    // Ambil N data PALING BARU terlebih dahulu (DESC), lalu urutkan ASC untuk tampilan grafik kronologis
     $sql = "
-        SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
-               rssi, firmware_ver, device_ts, ip_address, received_at
-        FROM telemetry
-        WHERE device_id = ? {$timeCondition}
+        SELECT * FROM (
+            SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
+                   rssi, firmware_ver, device_ts, ip_address, received_at
+            FROM telemetry
+            WHERE device_id = ? {$timeCondition}
+            ORDER BY received_at DESC, id DESC
+            LIMIT {$limit}
+        ) AS latest_sub
         ORDER BY received_at {$order}, id {$order}
-        LIMIT {$limit}
     ";
 
     $stmt = $db->prepare($sql);

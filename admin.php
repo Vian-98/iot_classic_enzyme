@@ -350,8 +350,28 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         .sev-warning  { background: rgba(251,191,36,0.15); color: #b45309; border: 1px solid rgba(251,191,36,0.3); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
         .sev-info     { background: var(--teal-soft); color: var(--teal-dark); border: 1px solid var(--teal-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
 
-        .device-status-online { color: var(--teal); font-weight: 700; }
-        .device-status-offline { color: var(--pink); font-weight: 700; }
+        .device-status-online {
+            display: inline-block;
+            background: var(--teal-soft);
+            color: var(--teal);
+            border: 1px solid var(--teal-border);
+            border-radius: 9999px;
+            padding: 2px 10px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
+        .device-status-offline {
+            display: inline-block;
+            background: var(--pink-soft);
+            color: var(--pink);
+            border: 1px solid var(--pink-border);
+            border-radius: 9999px;
+            padding: 2px 10px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
     </style>
 </head>
 <body data-page="admin">
@@ -629,8 +649,15 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                         <?= htmlspecialchars($dev['api_key']) ?>
                                     </span>
                                 </td>
+                                <?php 
+                                    $devLastSeen = $dev['last_seen'];
+                                    $devDiff = $devLastSeen ? (time() - strtotime($devLastSeen)) : null;
+                                    $isDevOnline = ($devDiff !== null && $devDiff <= 30);
+                                ?>
                                 <td>
-                                    <span class="device-status-<?= $dev['status'] ?>"><?= strtoupper($dev['status']) ?></span>
+                                    <span class="device-status-<?= $isDevOnline ? 'online' : 'offline' ?>">
+                                        <?= $isDevOnline ? 'ONLINE' : 'OFFLINE' ?>
+                                    </span>
                                 </td>
                                 <td style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted);">
                                     <?= $dev['last_seen'] ? htmlspecialchars(formatRelativeTime($dev['last_seen'])) : 'Belum pernah' ?>

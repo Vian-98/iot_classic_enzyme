@@ -70,7 +70,35 @@ CREATE TABLE IF NOT EXISTS `alarms` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- SEED DATA: Device Perdana
+-- 4. TABEL: admins
+-- Kredensial login panel manajemen administrator
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `admins` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(50) NOT NULL,
+  `password` VARCHAR(255) NOT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_admin_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 5. TABEL: thresholds
+-- Batas toleransi parameter sensor per device (bisa diatur via panel admin)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `thresholds` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `device_id` VARCHAR(50) NOT NULL,
+  `param` VARCHAR(20) NOT NULL COMMENT 'temp, ph, alcohol',
+  `val_min` DECIMAL(8, 2) NULL DEFAULT NULL,
+  `val_max` DECIMAL(8, 2) NULL DEFAULT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_device_param` (`device_id`, `param`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- SEED DATA: Device Perdana, Admin Default, & Thresholds
 -- ------------------------------------------------------------------------------
 INSERT INTO `devices` (`device_id`, `device_name`, `location`, `api_key`, `status`)
 VALUES 
@@ -78,5 +106,18 @@ VALUES
 ON DUPLICATE KEY UPDATE 
   `device_name` = VALUES(`device_name`),
   `location` = VALUES(`location`);
+
+-- Default admin account: username: admin / password: password
+INSERT INTO `admins` (`username`, `password`)
+VALUES 
+  ('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi')
+ON DUPLICATE KEY UPDATE `username` = `username`;
+
+-- Default thresholds (Suhu: 20-40°C, pH: 3.0-4.5)
+INSERT INTO `thresholds` (`device_id`, `param`, `val_min`, `val_max`) VALUES
+  ('esp32-ce-001', 'temp', 20.0, 40.0),
+  ('esp32-ce-001', 'ph', 3.0, 4.5),
+  ('esp32-ce-001', 'alcohol', NULL, NULL)
+ON DUPLICATE KEY UPDATE `device_id` = `device_id`;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -17,7 +17,12 @@ Dirancang khusus untuk keandalan maksimal di cPanel / Shared Hosting maupun VPS 
   2. pH — **PH-110** (RS485/Analog)
   3. Alkohol — **MQ-3** (ADC/ppm)
   4. Kekuatan Sinyal — **WiFi RSSI** (dBm)
-- **Ekspor Laporan**: Fitur unduh log telemetri ke format CSV untuk analisis laboratorium di Excel.
+- **Panel Admin Terproteksi**: Dilengkapi halaman login (`/login.php`) dan panel konfigurasi (`/admin.php`) untuk:
+  - Mengubah batas rentang ideal (Threshold Min/Max) Suhu, pH, dan Alkohol secara realtime
+  - Melihat IP Address asli pengirim ESP32 (disembunyikan dari dashboard publik demi keamanan)
+  - Mengelola API Key dan nama bioreaktor
+  - Mengubah password admin
+- **Ekspor Laporan**: Fitur unduh log telemetri ke format CSV untuk analisis laboratorium di Excel (kolom IP hanya muncul saat login sebagai admin).
 
 ---
 
@@ -26,24 +31,41 @@ Dirancang khusus untuk keandalan maksimal di cPanel / Shared Hosting maupun VPS 
 ```
 IOT/
 ├── config/
-│   └── database.php         # Koneksi PDO (MySQL dengan auto-fallback SQLite saat dev lokal)
+│   ├── database.php         # Koneksi PDO (MySQL dengan auto-fallback SQLite saat dev lokal)
+│   └── auth.php             # Session handler otentikasi & proteksi halaman admin
 ├── api/
 │   ├── telemetry.php        # [POST] Ingest data ESP32 + update last_seen + alarm check
 │   ├── latest.php           # [GET]  Data realtime & kalkulasi status online/offline
 │   ├── history.php          # [GET]  Data histori untuk grafik Chart.js & filter rentang waktu
 │   └── devices.php          # [GET]  Daftar seluruh bioreaktor terdaftar
 ├── db/
-│   └── schema.sql           # Schema MySQL (devices, telemetry, alarms) + seed data
+│   ├── schema.sql           # Schema MySQL (devices, telemetry, alarms, admins, thresholds)
+│   └── iot.sqlite           # Database lokal SQLite (otomatis dibuat saat dev offline)
 ├── assets/
 │   ├── css/
 │   │   └── style.css        # Sistem desain Liquid Glass, mode cerah/gelap, responsive
 │   └── js/
-│       └── app.js           # Polling 5s, ticker waktu relatif, Chart.js, simulasi data
-├── history.php              # Halaman riwayat telemetri, filter rentang tanggal & ekspor CSV
+│       └── app.js           # Polling 5s, ticker waktu relatif, Chart.js, dynamic thresholds
+├── admin.php                # Panel admin (pengaturan threshold, device, akun)
+├── login.php                # Halaman login admin
+├── logout.php               # Script logout admin
+├── history.php              # Halaman riwayat telemetri, filter rentang waktu & ekspor CSV
 ├── index.php                # Dashboard realtime utama berestetika Liquid Glass
-├── .htaccess                # Proteksi akses folder config/ & db/
+├── .htaccess                # Proteksi akses direktori config/ & db/ (Apache/cPanel)
+├── .gitignore               # Exclude database SQLite, logs, dan secrets dari Git
 └── README.md                # Dokumentasi instalasi dan integrasi firmware ESP32
 ```
+
+---
+
+## Akun Login Admin Default
+
+Setelah instalasi (baik via SQLite lokal maupun import `schema.sql` di MySQL):
+- **URL Login**: `http://domain-anda.com/login.php`
+- **Username**: `admin`
+- **Password**: `password`
+
+> **Sangat Disarankan**: Segera ganti password ini setelah berhasil login pertama kali melalui tab **"Pengaturan Akun"** di dalam panel admin.
 
 ---
 
@@ -55,19 +77,19 @@ IOT/
    ```
 2. Jalankan PHP Built-in Web Server:
    ```bash
-   php -S 127.0.0.1:8080
+   php -S 127.0.0.1:8899
    ```
 3. Buka browser di alamat:
    ```
-   http://127.0.0.1:8080
+   http://127.0.0.1:8899
    ```
-   *Catatan: Saat pengujian lokal di Mac tanpa MySQL, sistem otomatis menggunakan SQLite lokal (`db/iot.sqlite`) sehingga Anda bisa langsung mencoba dashboard tanpa setup database sama sekali!*
+   *Catatan: Saat pengujian lokal tanpa konfigurasi MySQL, sistem otomatis menggunakan SQLite lokal (`db/iot.sqlite`) dan menginisialisasi seluruh tabel + admin default secara otomatis.*
 
 4. Untuk menguji pengiriman data simulasi tanpa ESP32 fisik:
    - Klik tombol **"⚡ Simulasi Ingest ESP32"** di dashboard, atau
    - Jalankan perintah curl:
      ```bash
-     curl -X POST http://127.0.0.1:8080/api/telemetry.php \
+     curl -X POST http://127.0.0.1:8899/api/telemetry.php \
        -H "Content-Type: application/json" \
        -d '{
          "device_id": "esp32-ce-001",
@@ -81,32 +103,43 @@ IOT/
 
 ---
 
-## Panduan Deploy ke cPanel Hosting
+## Panduan Deploy ke Hosting / VPS (cPanel, Nginx, Apache)
 
-1. **Buat Database MySQL di cPanel**:
+### Metode A: Menggunakan MySQL (Disarankan untuk Produksi)
+1. **Buat Database MySQL**:
    - Masuk ke cPanel > **MySQL Databases**.
    - Buat database baru (misal: `u1234_classic_enzyme`).
-   - Buat user database dan hubungkan dengan hak akses penuh (**ALL PRIVILEGES**).
+   - Buat user database dan berikan hak akses penuh (**ALL PRIVILEGES**).
 2. **Import Schema**:
-   - Buka **phpMyAdmin** di cPanel.
-   - Pilih database yang baru dibuat, klik tab **Import**, lalu pilih file `db/schema.sql`.
-3. **Konfigurasi Kredensial**:
-   - Edit file `config/database.php` melalui File Manager:
+   - Buka **phpMyAdmin**.
+   - Pilih database tersebut, klik tab **Import**, pilih file `db/schema.sql`.
+   - Ini otomatis membuat 5 tabel: `devices`, `telemetry`, `alarms`, `admins`, dan `thresholds` lengkap dengan data awal.
+3. **Konfigurasi Kredensial Database**:
+   - Buka file `config/database.php`:
      ```php
      define('DB_DRIVER', 'mysql');
      define('DB_HOST',   'localhost'); // atau 127.0.0.1
      define('DB_NAME',   'u1234_classic_enzyme');
      define('DB_USER',   'u1234_iotuser');
-     define('DB_PASS',   'PasswordKuatAnda');
+     define('DB_PASS',   'PasswordDatabaseAnda');
      ```
 4. **Upload File**:
-   - Upload seluruh folder/file proyek ini ke direktori tujuan (misal: `public_html/iot` atau langsung di `public_html`).
+   - Upload seluruh isi folder proyek ke direktori `public_html` (atau subdomain).
+   - Pastikan web server mendukung file `.htaccess` (mod_rewrite aktif) agar folder `config/` dan `db/` terproteksi otomatis.
+
+### Metode B: Menggunakan SQLite (Zero Setup di Hosting Murah/VPS)
+1. Cukup upload semua file ke server.
+2. Di `config/database.php`, biarkan default:
+   ```php
+   define('DB_DRIVER', 'sqlite');
+   ```
+3. Pastikan direktori `db/` memiliki permission tulis (CHMOD 755 atau 775) agar file `db/iot.sqlite` dapat ditulis oleh web server.
 
 ---
 
 ## Format Integrasi Firmware ESP32 (HTTP POST)
 
-Setiap 5 detik (atau interval yang diinginkan), firmware ESP32 mengirim HTTP POST JSON ke endpoint:
+Setiap interval pembacaan (misal 5 detik), firmware ESP32 mengirim HTTP POST JSON ke endpoint:
 `http://domain-anda.com/api/telemetry.php`
 
 ### JSON Payload:

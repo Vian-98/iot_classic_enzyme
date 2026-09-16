@@ -1,0 +1,29 @@
+# ==============================================================================
+# Classic Enzyme IoT - Apache / cPanel Security & Routing Configuration
+# ==============================================================================
+
+Options -Indexes
+ServerSignature Off
+
+# Proteksi Direktori Sensitif (config dan db tidak boleh diakses langsung dari browser)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Blokir akses langsung ke folder config dan db
+    RewriteRule ^config/ - [F,L]
+    RewriteRule ^db/ - [F,L]
+
+    # Blokir file sensitif
+    RewriteRule \.(sql|sqlite|sqlite3|env|log|bak|git)$ - [F,L]
+</IfModule>
+
+# Keamanan Header Tambahan
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Pengaturan Charset Standar UTF-8
+AddDefaultCharset UTF-8

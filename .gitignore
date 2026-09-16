@@ -1,0 +1,31 @@
+# Database files (contains real sensor data & credentials)
+db/*.db
+db/*.sqlite
+db/*.sqlite3
+
+# PHP session/cache
+*.session
+*.cache
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+php_errors.log
+
+# Environment / secrets
+.env
+*.env.local
+config/secrets.php
+
+# Node (if ever added)
+node_modules/

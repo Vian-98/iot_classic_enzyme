@@ -276,6 +276,18 @@ $stats = [
                     <h2 style="font-size: 1.15rem; font-weight: 700;">Log Riwayat Telemetri</h2>
                     <p style="font-size: 0.78rem; color: var(--text-muted);">Diurutkan dari data yang paling baru diterima di server</p>
                 </div>
+                <!-- Filter Tampilan Tabel -->
+                <div class="device-status-filter" id="histFilterGroup" role="group" aria-label="Filter tampilan tabel">
+                    <button class="filter-status-btn active" data-histfilter="all">
+                        Semua
+                    </button>
+                    <button class="filter-status-btn" data-histfilter="online">
+                        <span class="filter-dot online"></span>Data Normal
+                    </button>
+                    <button class="filter-status-btn" data-histfilter="offline">
+                        <span class="filter-dot offline"></span>Periode Offline
+                    </button>
+                </div>
             </div>
 
             <div class="table-responsive">
@@ -326,7 +338,7 @@ $stats = [
                                     }
                                     $prevTimestamp = $currentTimestamp;
                             ?>
-                                <tr>
+                                <tr class="data-row">
                                     <td>#<?= $r['id'] ?></td>
                                     <td><?= htmlspecialchars($r['received_at']) ?></td>
                                     <td style="color:var(--text-muted); font-size:0.75rem;"><?= formatRelativeTime($r['received_at']) ?></td>
@@ -365,8 +377,11 @@ $stats = [
 
     </div>
 
-    <!-- Theme Switcher Script for history.php -->
+    <!-- Theme Switcher + History Filter Script -->
     <script>
+        // -----------------------------------------------
+        // Theme
+        // -----------------------------------------------
         const theme = localStorage.getItem('ce_theme') || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('themeIcon');
@@ -374,10 +389,8 @@ $stats = [
         function updateThemeIcon(t) {
             if (!icon) return;
             if (t === 'dark') {
-                // Bulan (Moon)
                 icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
             } else {
-                // Matahari (Sun)
                 icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
             }
         }
@@ -390,6 +403,44 @@ $stats = [
             localStorage.setItem('ce_theme', next);
             updateThemeIcon(next);
         });
+
+        // -----------------------------------------------
+        // Filter Tampilan Tabel Riwayat
+        // -----------------------------------------------
+        (function() {
+            const filterBtns  = document.querySelectorAll('#histFilterGroup .filter-status-btn');
+            const dataRows     = document.querySelectorAll('tbody .data-row');
+            const offlineRows  = document.querySelectorAll('tbody .downtime-row');
+
+            // Hitung jumlah untuk badge
+            const totalData    = dataRows.length;
+            const totalOffline = offlineRows.length;
+
+            // Update label badge awal
+            filterBtns.forEach(btn => {
+                const f = btn.getAttribute('data-histfilter');
+                if (f === 'all')     btn.textContent = `Semua (${totalData + totalOffline})`;
+                if (f === 'online')  btn.innerHTML   = `<span class="filter-dot online"></span>Data Normal (${totalData})`;
+                if (f === 'offline') btn.innerHTML   = `<span class="filter-dot offline"></span>Periode Offline (${totalOffline})`;
+            });
+
+            function applyHistFilter(filter) {
+                dataRows.forEach(row => {
+                    row.style.display = (filter === 'offline') ? 'none' : '';
+                });
+                offlineRows.forEach(row => {
+                    row.style.display = (filter === 'online') ? 'none' : '';
+                });
+            }
+
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    filterBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    applyHistFilter(btn.getAttribute('data-histfilter') || 'all');
+                });
+            });
+        })();
     </script>
 </body>
 </html>

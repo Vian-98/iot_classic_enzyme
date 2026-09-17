@@ -32,11 +32,12 @@ try {
 
     $output = [];
     $now = time();
+    $offlineTimeout = (int)getSetting('offline_timeout_seconds', 300);
 
     foreach ($devices as $dev) {
         $lastSeen = $dev['last_seen'];
         $secondsAgo = $lastSeen ? max(0, $now - strtotime($lastSeen)) : null;
-        $isOnline = ($secondsAgo !== null && $secondsAgo <= 30);
+        $isOnline = ($secondsAgo !== null && $secondsAgo <= $offlineTimeout);
 
         $output[] = [
             'id' => (int)$dev['id'],
@@ -57,6 +58,7 @@ try {
     echo json_encode([
         'status' => 'ok',
         'count' => count($output),
+        'offline_timeout_seconds' => $offlineTimeout,
         'devices' => $output
     ]);
 

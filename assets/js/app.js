@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
         pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
         offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
+        deviceStatusFilter: 'all',  // 'all' | 'online' | 'offline'
+        deviceMap: {},              // { device_id: { is_online, device_name } }
         chartInstance: null,
         pollTimer: null,
         secondsTickerTimer: null,
@@ -49,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnRefresh: document.getElementById('btnRefresh'),
         btnSimulate: document.getElementById('btnSimulate'),
         toastContainer: document.getElementById('toastContainer'),
+        filterStatusBtns: document.querySelectorAll('.filter-status-btn'),
     };
 
     // --------------------------------------------------------------------------
@@ -546,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
             prevEpoch = currentEpoch;
 
             tableHtml += `
-                <tr>
+                <tr class="data-row">
                     <td>
                         <strong>${escapeHtml(row.time)}</strong>
                         <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
@@ -576,6 +579,113 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Beralih ke perangkat: ${state.currentDeviceId}`);
         });
     }
+
+    // --------------------------------------------------------------------------
+    // 7b. FILTER STATUS DEVICE (Semua / Online / Offline)
+    // --------------------------------------------------------------------------
+
+    /**
+     * Ambil daftar device dari API, simpan status ke state.deviceMap,
+     * lalu terapkan filter ke opsi dropdown.
+     */
+    async function fetchAndApplyDeviceFilter() {
+        try {
+            const res = await fetch('api/devices.php');
+            const json = await res.json();
+            if (json.status !== 'ok' || !Array.isArray(json.devices)) return;
+
+            // Sinkronkan offline timeout jika ada
+            if (json.offline_timeout_seconds) {
+                state.offlineTimeout = json.offline_timeout_seconds;
+            }
+
+            // Simpan status setiap device ke map
+            json.devices.forEach(dev => {
+                state.deviceMap[dev.device_id] = {
+                    is_online: dev.is_online,
+                    device_name: dev.device_name,
+                    seconds_ago: dev.seconds_ago,
+                    relative_time: dev.relative_time,
+                };
+            });
+
+            applyDeviceFilter();
+        } catch (err) {
+            console.warn('Gagal memuat daftar device:', err);
+        }
+    }
+
+    /**
+     * Terapkan filter visual ke opsi di dalam <select#deviceSelect>
+     * berdasarkan state.deviceStatusFilter ('all'|'online'|'offline')
+     */
+    function applyDeviceFilter() {
+        if (!el.deviceSelect) return;
+        const filterVal = state.deviceStatusFilter;
+        const options = el.deviceSelect.querySelectorAll('option');
+
+        let firstVisibleValue = null;
+        options.forEach(opt => {
+            const devId = opt.value;
+            const devStatus = state.deviceMap[devId];
+
+            // Jika belum ada di map (baru dimuat), tampilkan saja
+            if (!devStatus) {
+                opt.hidden = false;
+                if (!firstVisibleValue) firstVisibleValue = devId;
+                return;
+            }
+
+            let visible = true;
+            if (filterVal === 'online')  visible = devStatus.is_online;
+            if (filterVal === 'offline') visible = !devStatus.is_online;
+
+            opt.hidden = !visible;
+            if (visible && !firstVisibleValue) firstVisibleValue = devId;
+        });
+
+        // Jika device yang sedang aktif tersembunyi, otomatis pindah ke device pertama yang terlihat
+        const currentOpt = el.deviceSelect.querySelector(`option[value="${state.currentDeviceId}"]`);
+        if (currentOpt && currentOpt.hidden && firstVisibleValue) {
+            el.deviceSelect.value = firstVisibleValue;
+            state.currentDeviceId = firstVisibleValue;
+            fetchLatestData();
+            fetchHistoryData();
+        } else if (!currentOpt && firstVisibleValue) {
+            el.deviceSelect.value = firstVisibleValue;
+            state.currentDeviceId = firstVisibleValue;
+            fetchLatestData();
+            fetchHistoryData();
+        }
+
+        // Update label filter button agar tampilkan jumlah
+        const total   = Object.keys(state.deviceMap).length;
+        const online  = Object.values(state.deviceMap).filter(d => d.is_online).length;
+        const offline = total - online;
+
+        el.filterStatusBtns.forEach(btn => {
+            const s = btn.getAttribute('data-status');
+            if (s === 'all')     btn.textContent = total   > 0 ? `Semua (${total})`   : 'Semua';
+            if (s === 'online')  btn.innerHTML   = online  > 0
+                ? `<span class="filter-dot online"></span>Online (${online})`
+                : `<span class="filter-dot online"></span>Online`;
+            if (s === 'offline') btn.innerHTML   = offline > 0
+                ? `<span class="filter-dot offline"></span>Offline (${offline})`
+                : `<span class="filter-dot offline"></span>Offline`;
+        });
+    }
+
+    // Event listener tombol filter status
+    el.filterStatusBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            el.filterStatusBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.deviceStatusFilter = btn.getAttribute('data-status') || 'all';
+            applyDeviceFilter();
+            const label = { all: 'Semua', online: 'Online Saja', offline: 'Offline Saja' };
+            showToast(`Filter perangkat: ${label[state.deviceStatusFilter] || ''}`);
+        });
+    });
 
     // Tab Rentang Waktu Chart (1h, 6h, 24h, all)
     el.chartRangeTabs.forEach(btn => {
@@ -670,12 +780,16 @@ document.addEventListener('DOMContentLoaded', () => {
     initChart();
     fetchLatestData();
     fetchHistoryData();
+    fetchAndApplyDeviceFilter();   // Inisialisasi filter status device
 
     // Polling data realtime dari server tiap 3 detik
     state.pollTimer = setInterval(fetchLatestData, state.pollIntervalMs);
 
     // Refresh grafik & tabel otomatis tiap 6 detik (fallback jika tidak ada push baru)
     setInterval(fetchHistoryData, 6000);
+
+    // Refresh status filter device setiap 30 detik (update badge jumlah online/offline)
+    setInterval(fetchAndApplyDeviceFilter, 30000);
 
     // Ticker hitungan detik update tiap 1 detik
     state.secondsTickerTimer = setInterval(updateRelativeTimeCounter, 1000);
@@ -685,6 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState === 'visible') {
             fetchLatestData();
             fetchHistoryData();
+            fetchAndApplyDeviceFilter();
         }
     });
 });

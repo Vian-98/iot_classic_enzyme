@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
         offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
         deviceStatusFilter: 'all',  // 'all' | 'online' | 'offline'
         deviceMap: {},              // { device_id: { is_online, device_name } }
+        tableFilter: 'all',         // 'all' | 'valid' | 'offline'
         chartInstance: null,
         pollTimer: null,
         secondsTickerTimer: null,
@@ -51,7 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
         btnRefresh: document.getElementById('btnRefresh'),
         btnSimulate: document.getElementById('btnSimulate'),
         toastContainer: document.getElementById('toastContainer'),
-        filterStatusBtns: document.querySelectorAll('.filter-status-btn'),
+        filterDeviceBtns: document.querySelectorAll('#deviceStatusFilter .filter-status-btn'),
+        filterTableBtns: document.querySelectorAll('#realtimeTableFilter .filter-status-btn'),
     };
 
     // --------------------------------------------------------------------------
@@ -523,6 +525,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let tableHtml = '';
         let prevEpoch = null;
         const offlineThreshold = state.offlineTimeout || 300;
+        let countValid = 0;
+        let countOffline = 0;
 
         recentRows.forEach(row => {
             const currentEpoch = row.epoch || (row.datetime ? Math.floor(new Date(row.datetime).getTime() / 1000) : null);
@@ -531,11 +535,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (prevEpoch !== null && currentEpoch !== null) {
                 const gapSeconds = prevEpoch - currentEpoch; // urutan menurun (newest first)
                 if (gapSeconds > offlineThreshold) {
+                    countOffline++;
                     const gapHrs = Math.floor(gapSeconds / 3600);
                     const gapMins = Math.floor((gapSeconds % 3600) / 60);
                     const gapLabel = gapHrs > 0 ? `${gapHrs} jam ${gapMins} menit` : `${gapMins} menit`;
+                    const isHidden = (state.tableFilter === 'valid') ? 'style="display:none;"' : '';
                     tableHtml += `
-                        <tr class="downtime-row">
+                        <tr class="downtime-row" ${isHidden}>
                             <td colspan="6">
                                 <div class="downtime-badge">
                                     <span class="downtime-dot"></span>
@@ -548,8 +554,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             prevEpoch = currentEpoch;
 
+            countValid++;
+            const isHidden = (state.tableFilter === 'offline') ? 'style="display:none;"' : '';
             tableHtml += `
-                <tr class="data-row">
+                <tr class="data-row" ${isHidden}>
                     <td>
                         <strong>${escapeHtml(row.time)}</strong>
                         <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
@@ -563,7 +571,20 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         });
 
+        // Pesan jika filter offline aktif namun tidak ada baris offline
+        if (state.tableFilter === 'offline' && countOffline === 0) {
+            tableHtml += `
+                <tr class="empty-filter-row">
+                    <td colspan="6" style="text-align:center; color:var(--teal); padding:18px; font-size:0.8rem;">
+                        <span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>
+                        Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime
+                    </td>
+                </tr>
+            `;
+        }
+
         el.historyTableBody.innerHTML = tableHtml;
+        updateTableFilterBadges(countValid, countOffline);
     }
 
     // --------------------------------------------------------------------------
@@ -658,34 +679,104 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchHistoryData();
         }
 
-        // Update label filter button agar tampilkan jumlah
+        // Update label filter button device agar tampilkan jumlah
         const total   = Object.keys(state.deviceMap).length;
         const online  = Object.values(state.deviceMap).filter(d => d.is_online).length;
         const offline = total - online;
 
-        el.filterStatusBtns.forEach(btn => {
-            const s = btn.getAttribute('data-status');
-            if (s === 'all')     btn.textContent = total   > 0 ? `Semua (${total})`   : 'Semua';
-            if (s === 'online')  btn.innerHTML   = online  > 0
-                ? `<span class="filter-dot online"></span>Online (${online})`
-                : `<span class="filter-dot online"></span>Online`;
-            if (s === 'offline') btn.innerHTML   = offline > 0
-                ? `<span class="filter-dot offline"></span>Offline (${offline})`
-                : `<span class="filter-dot offline"></span>Offline`;
+        if (el.filterDeviceBtns) {
+            el.filterDeviceBtns.forEach(btn => {
+                const s = btn.getAttribute('data-status');
+                if (s === 'all')     btn.textContent = total   > 0 ? `Semua (${total})`   : 'Semua';
+                if (s === 'online')  btn.innerHTML   = online  > 0
+                    ? `<span class="filter-dot online"></span>Online (${online})`
+                    : `<span class="filter-dot online"></span>Online`;
+                if (s === 'offline') btn.innerHTML   = offline > 0
+                    ? `<span class="filter-dot offline"></span>Offline (${offline})`
+                    : `<span class="filter-dot offline"></span>Offline`;
+            });
+        }
+    }
+
+    // Event listener tombol filter status perangkat di header
+    if (el.filterDeviceBtns) {
+        el.filterDeviceBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                el.filterDeviceBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.deviceStatusFilter = btn.getAttribute('data-status') || 'all';
+                applyDeviceFilter();
+                const label = { all: 'Semua', online: 'Online Saja', offline: 'Offline Saja' };
+                showToast(`Filter perangkat: ${label[state.deviceStatusFilter] || ''}`);
+            });
         });
     }
 
-    // Event listener tombol filter status
-    el.filterStatusBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            el.filterStatusBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.deviceStatusFilter = btn.getAttribute('data-status') || 'all';
-            applyDeviceFilter();
-            const label = { all: 'Semua', online: 'Online Saja', offline: 'Offline Saja' };
-            showToast(`Filter perangkat: ${label[state.deviceStatusFilter] || ''}`);
+    // --------------------------------------------------------------------------
+    // 7c. FILTER BARIS TABEL TELEMETRI (Semua / Valid (Ada Data) / Offline)
+    // --------------------------------------------------------------------------
+
+    /**
+     * Perbarui angka counter badge pada filter baris tabel realtime
+     */
+    function updateTableFilterBadges(validCount, offlineCount) {
+        if (!el.filterTableBtns) return;
+        const total = validCount + offlineCount;
+        el.filterTableBtns.forEach(btn => {
+            const f = btn.getAttribute('data-tablefilter');
+            if (f === 'all')     btn.textContent = total > 0 ? `Semua (${total})` : 'Semua';
+            if (f === 'valid')   btn.innerHTML   = validCount > 0
+                ? `<span class="filter-dot online"></span>Valid (Ada Data) (${validCount})`
+                : `<span class="filter-dot online"></span>Valid (Ada Data)`;
+            if (f === 'offline') btn.innerHTML   = offlineCount > 0
+                ? `<span class="filter-dot offline"></span>Offline (${offlineCount})`
+                : `<span class="filter-dot offline"></span>Offline (0)`;
         });
-    });
+    }
+
+    /**
+     * Terapkan filter tampilan baris tabel telemetri secara instan
+     */
+    function applyTableFilter(filterVal) {
+        state.tableFilter = filterVal;
+        if (!el.historyTableBody) return;
+        const dataRows = el.historyTableBody.querySelectorAll('.data-row');
+        const offlineRows = el.historyTableBody.querySelectorAll('.downtime-row');
+        const emptyRows = el.historyTableBody.querySelectorAll('.empty-filter-row');
+        emptyRows.forEach(r => r.remove());
+
+        dataRows.forEach(r => {
+            r.style.display = (filterVal === 'offline') ? 'none' : '';
+        });
+        offlineRows.forEach(r => {
+            r.style.display = (filterVal === 'valid') ? 'none' : '';
+        });
+
+        if (filterVal === 'offline' && offlineRows.length === 0) {
+            el.historyTableBody.insertAdjacentHTML('beforeend', `
+                <tr class="empty-filter-row">
+                    <td colspan="6" style="text-align:center; color:var(--teal); padding:18px; font-size:0.8rem;">
+                        <span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>
+                        Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime
+                    </td>
+                </tr>
+            `);
+        }
+    }
+
+    // Event listener tombol filter baris tabel realtime (Semua / Valid (Ada Data) / Offline)
+    if (el.filterTableBtns) {
+        el.filterTableBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                el.filterTableBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const f = btn.getAttribute('data-tablefilter') || 'all';
+                applyTableFilter(f);
+                const label = { all: 'Semua Data & Offline', valid: 'Hanya Data Valid', offline: 'Hanya Periode Offline' };
+                showToast(`Filter tabel: ${label[f] || ''}`);
+            });
+        });
+    }
 
     // Tab Rentang Waktu Chart (1h, 6h, 24h, all)
     el.chartRangeTabs.forEach(btn => {

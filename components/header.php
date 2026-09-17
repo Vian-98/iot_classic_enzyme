@@ -17,7 +17,7 @@
     <div class="dock-controls">
 
         <!-- Filter Status Device (Semua / Online / Offline) -->
-        <div class="device-status-filter" role="group" aria-label="Filter status perangkat">
+        <div class="device-status-filter" id="deviceStatusFilter" role="group" aria-label="Filter status perangkat">
             <button class="filter-status-btn active" data-status="all" title="Tampilkan semua perangkat">Semua</button>
             <button class="filter-status-btn" data-status="online" title="Tampilkan perangkat online saja">
                 <span class="filter-dot online"></span>Online

@@ -276,16 +276,16 @@ $stats = [
                     <h2 style="font-size: 1.15rem; font-weight: 700;">Log Riwayat Telemetri</h2>
                     <p style="font-size: 0.78rem; color: var(--text-muted);">Diurutkan dari data yang paling baru diterima di server</p>
                 </div>
-                <!-- Filter Tampilan Tabel -->
+                <!-- Filter Tampilan Tabel: Semua / Valid (Ada Data) / Offline -->
                 <div class="device-status-filter" id="histFilterGroup" role="group" aria-label="Filter tampilan tabel">
                     <button class="filter-status-btn active" data-histfilter="all">
                         Semua
                     </button>
-                    <button class="filter-status-btn" data-histfilter="online">
-                        <span class="filter-dot online"></span>Data Normal
+                    <button class="filter-status-btn" data-histfilter="valid">
+                        <span class="filter-dot online"></span>Valid (Ada Data)
                     </button>
                     <button class="filter-status-btn" data-histfilter="offline">
-                        <span class="filter-dot offline"></span>Periode Offline
+                        <span class="filter-dot offline"></span>Offline (Tidak Ada Data)
                     </button>
                 </div>
             </div>
@@ -420,8 +420,8 @@ $stats = [
             filterBtns.forEach(btn => {
                 const f = btn.getAttribute('data-histfilter');
                 if (f === 'all')     btn.textContent = `Semua (${totalData + totalOffline})`;
-                if (f === 'online')  btn.innerHTML   = `<span class="filter-dot online"></span>Data Normal (${totalData})`;
-                if (f === 'offline') btn.innerHTML   = `<span class="filter-dot offline"></span>Periode Offline (${totalOffline})`;
+                if (f === 'valid')   btn.innerHTML   = `<span class="filter-dot online"></span>Valid (Ada Data) (${totalData})`;
+                if (f === 'offline') btn.innerHTML   = `<span class="filter-dot offline"></span>Offline (${totalOffline})`;
             });
 
             function applyHistFilter(filter) {
@@ -429,7 +429,7 @@ $stats = [
                     row.style.display = (filter === 'offline') ? 'none' : '';
                 });
                 offlineRows.forEach(row => {
-                    row.style.display = (filter === 'online') ? 'none' : '';
+                    row.style.display = (filter === 'valid') ? 'none' : '';
                 });
             }
 

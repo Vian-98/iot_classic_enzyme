@@ -404,13 +404,16 @@ body {
 }
 
 .filter-status-btn[data-status="online"].active,
-.filter-status-btn[data-histfilter="online"].active {
+.filter-status-btn[data-histfilter="online"].active,
+.filter-status-btn[data-histfilter="valid"].active,
+.filter-status-btn[data-tablefilter="valid"].active {
   background: var(--teal);
   color: #fff;
 }
 
 .filter-status-btn[data-status="offline"].active,
-.filter-status-btn[data-histfilter="offline"].active {
+.filter-status-btn[data-histfilter="offline"].active,
+.filter-status-btn[data-tablefilter="offline"].active {
   background: var(--pink);
   color: #fff;
 }

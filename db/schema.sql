@@ -98,7 +98,18 @@ CREATE TABLE IF NOT EXISTS `thresholds` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- SEED DATA: Device Perdana, Admin Default, & Thresholds
+-- 6. TABEL: settings
+-- Konfigurasi sistem dinamis (key-value)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `settings` (
+  `setting_key` VARCHAR(50) NOT NULL,
+  `setting_value` TEXT NOT NULL,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`setting_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- SEED DATA: Device Perdana, Admin Default, Thresholds, & Settings
 -- ------------------------------------------------------------------------------
 INSERT INTO `devices` (`device_id`, `device_name`, `location`, `api_key`, `status`)
 VALUES 
@@ -113,11 +124,17 @@ VALUES
   ('admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi')
 ON DUPLICATE KEY UPDATE `username` = `username`;
 
--- Default thresholds (Suhu: 20-40°C, pH: 3.0-4.5)
+-- Default thresholds (Suhu: 20-40°C, pH: 3.0-4.5, Alkohol batas aman: 800 ADC)
 INSERT INTO `thresholds` (`device_id`, `param`, `val_min`, `val_max`) VALUES
   ('esp32-ce-001', 'temp', 20.0, 40.0),
   ('esp32-ce-001', 'ph', 3.0, 4.5),
-  ('esp32-ce-001', 'alcohol', NULL, NULL)
+  ('esp32-ce-001', 'alcohol', NULL, 800.0)
 ON DUPLICATE KEY UPDATE `device_id` = `device_id`;
 
+-- Default system settings (offline timeout: 300 detik = 5 menit)
+INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
+  ('offline_timeout_seconds', '300')
+ON DUPLICATE KEY UPDATE `setting_key` = `setting_key`;
+
 SET FOREIGN_KEY_CHECKS = 1;
+

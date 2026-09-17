@@ -15,8 +15,17 @@ $action   = $_GET['action'] ?? '';
 
 // Handle CSV Export
 if ($action === 'export_csv') {
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=telemetri_classic_enzyme_' . date('Ymd_His') . '.csv');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    $output = fopen('php://output', 'w');
+    // UTF-8 BOM untuk Microsoft Excel agar kolom rapi otomatis
+    fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
     $headers = ['ID', 'Device ID', 'Waktu Penerimaan', 'Suhu (C)', 'pH', 'Alkohol (ADC)', 'Raw Temp', 'Raw ADC', 'WiFi RSSI', 'Firmware'];
     if (isAdminLoggedIn()) {
@@ -24,7 +33,7 @@ if ($action === 'export_csv') {
     }
     fputcsv($output, $headers);
 
-    $stmtExport = $db->prepare("SELECT * FROM telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 1000");
+    $stmtExport = $db->prepare("SELECT * FROM telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 5000");
     $stmtExport->execute([$deviceId]);
     while ($row = $stmtExport->fetch()) {
         $csvRow = [
@@ -134,8 +143,7 @@ $stats = [
         <!-- Navbar Dock -->
         <header class="navbar-dock glass">
             <div class="brand-section">
-                <a href="index.php" style="text-decoration:none; display:flex; align-items:center; gap:12px;">
-                    <div class="brand-logo-glass">CE</div>
+                <a href="index.php" style="text-decoration:none; display:flex; align-items:center;">
                     <div>
                         <h1 class="brand-title">Classic Enzyme</h1>
                         <div class="brand-subtitle">Riwayat Telemetri</div>
@@ -151,8 +159,8 @@ $stats = [
                 <?php else: ?>
                 <a href="login.php" class="glass-btn" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
                 <?php endif; ?>
-                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme">
-                    <span id="themeIcon">D</span>
+                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
+                    <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
                 </button>
             </div>
         </header>
@@ -294,7 +302,30 @@ $stats = [
                                 </td>
                             </tr>
                         <?php else: ?>
-                            <?php foreach ($records as $r): ?>
+                            <?php 
+                                $prevTimestamp = null;
+                                $offlineTimeout = (int)getSetting('offline_timeout_seconds', 300);
+                                foreach ($records as $r): 
+                                    $currentTimestamp = strtotime($r['received_at']);
+                                    if ($prevTimestamp !== null) {
+                                        $gapSeconds = $prevTimestamp - $currentTimestamp;
+                                        if ($gapSeconds > $offlineTimeout) {
+                                            $gapHrs = floor($gapSeconds / 3600);
+                                            $gapMins = floor(($gapSeconds % 3600) / 60);
+                                            $gapLabel = $gapHrs > 0 ? "{$gapHrs} jam {$gapMins} menit" : "{$gapMins} menit";
+                                            $colSpan = isAdminLoggedIn() ? 8 : 7;
+                                            echo "<tr class='downtime-row'>
+                                                <td colspan='{$colSpan}'>
+                                                    <div class='downtime-badge'>
+                                                        <span class='downtime-dot'></span>
+                                                        <span><strong>PERANGKAT OFFLINE / PUTUS</strong> selama <strong>{$gapLabel}</strong> (antara " . date('H:i:s', $currentTimestamp) . " s/d " . date('H:i:s', $prevTimestamp) . ")</span>
+                                                    </div>
+                                                </td>
+                                            </tr>";
+                                        }
+                                    }
+                                    $prevTimestamp = $currentTimestamp;
+                            ?>
                                 <tr>
                                     <td>#<?= $r['id'] ?></td>
                                     <td><?= htmlspecialchars($r['received_at']) ?></td>
@@ -310,7 +341,7 @@ $stats = [
                                         </span>
                                     </td>
                                     <td>
-                                        <span style="color:var(--violet); font-weight:700;">
+                                        <span style="color:var(--amber); font-weight:700;">
                                             <?= $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--' ?>
                                         </span>
                                     </td>
@@ -339,14 +370,25 @@ $stats = [
         const theme = localStorage.getItem('ce_theme') || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('themeIcon');
-        if (icon) icon.textContent = theme === 'dark' ? 'D' : 'L';
+        
+        function updateThemeIcon(t) {
+            if (!icon) return;
+            if (t === 'dark') {
+                // Bulan (Moon)
+                icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+            } else {
+                // Matahari (Sun)
+                icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+            }
+        }
+        updateThemeIcon(theme);
 
         document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
             const current = document.documentElement.getAttribute('data-theme') || 'dark';
             const next = current === 'dark' ? 'light' : 'dark';
             document.documentElement.setAttribute('data-theme', next);
             localStorage.setItem('ce_theme', next);
-            if (icon) icon.textContent = next === 'dark' ? 'D' : 'L';
+            updateThemeIcon(next);
         });
     </script>
 </body>

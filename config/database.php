@@ -151,6 +151,12 @@ function initSqliteSchema(PDO $pdo) {
         UNIQUE(device_id, param)
     );
 
+    CREATE TABLE IF NOT EXISTS settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     INSERT OR IGNORE INTO devices (device_id, device_name, location, api_key, status)
     VALUES ('esp32-ce-001', 'Bioreaktor Classic Enzyme 01', 'Ruang Fermentasi A', 'ce-secret-key-001', 'offline');
 
@@ -160,9 +166,76 @@ function initSqliteSchema(PDO $pdo) {
     INSERT OR IGNORE INTO thresholds (device_id, param, val_min, val_max) VALUES
         ('esp32-ce-001', 'temp', 20.0, 40.0),
         ('esp32-ce-001', 'ph', 3.0, 4.5),
-        ('esp32-ce-001', 'alcohol', NULL, NULL);
+        ('esp32-ce-001', 'alcohol', NULL, 800.0);
+
+    INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
+        ('offline_timeout_seconds', '300');
     ";
     $pdo->exec($schema);
+}
+
+/**
+ * Mengambil nilai konfigurasi dari tabel settings (MySQL & SQLite)
+ * @param string $key
+ * @param mixed $default
+ * @return mixed
+ */
+function getSetting($key, $default = null) {
+    try {
+        $db = getDB();
+        // Pastikan tabel settings ada
+        $isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+        if ($isMysql) {
+            $db->exec("CREATE TABLE IF NOT EXISTS settings (
+                setting_key VARCHAR(50) NOT NULL PRIMARY KEY,
+                setting_value TEXT NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+        } else {
+            $db->exec("CREATE TABLE IF NOT EXISTS settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );");
+        }
+
+        $stmt = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+        return $row ? $row['setting_value'] : $default;
+    } catch (Exception $e) {
+        return $default;
+    }
+}
+
+/**
+ * Menyimpan / memperbarui nilai konfigurasi ke tabel settings (MySQL & SQLite)
+ * @param string $key
+ * @param mixed $value
+ * @return bool
+ */
+function setSetting($key, $value) {
+    try {
+        $db = getDB();
+        $isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+        if ($isMysql) {
+            $stmt = $db->prepare("
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
+            ");
+        } else {
+            $stmt = $db->prepare("
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES (?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = datetime('now','localtime')
+            ");
+        }
+        return $stmt->execute([$key, (string)$value]);
+    } catch (Exception $e) {
+        error_log("setSetting error: " . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -185,3 +258,4 @@ function formatRelativeTime($datetime) {
 
     return date('d M Y H:i', $timestamp);
 }
+

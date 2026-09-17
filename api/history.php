@@ -91,6 +91,7 @@ try {
             'id' => (int)$r['id'],
             'time' => date('H:i:s', strtotime($r['received_at'])),
             'datetime' => $r['received_at'],
+            'epoch' => strtotime($r['received_at']),
             'relative_time' => formatRelativeTime($r['received_at']),
             'temperature' => $temp,
             'ph' => $ph,
@@ -113,6 +114,11 @@ try {
             'min' => !empty($phs) ? min($phs) : null,
             'max' => !empty($phs) ? max($phs) : null,
             'avg' => !empty($phs) ? round(array_sum($phs) / count($phs), 2) : null,
+        ],
+        'alcohol' => [
+            'min' => !empty($alcohols) ? min($alcohols) : null,
+            'max' => !empty($alcohols) ? max($alcohols) : null,
+            'avg' => !empty($alcohols) ? round(array_sum($alcohols) / count($alcohols), 1) : null,
         ]
     ];
 

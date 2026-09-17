@@ -25,6 +25,12 @@
   --teal-soft:    rgba(78, 191, 193, 0.18);
   --teal-border:  rgba(78, 191, 193, 0.35);
   --teal-glow:    rgba(78, 191, 193, 0.25);
+  --amber:        #f59e0b;
+  --amber-soft:   rgba(245, 158, 11, 0.18);
+  --amber-border: rgba(245, 158, 11, 0.40);
+  --amber-dark:   #d97706;
+  --danger:       #ef4444;
+  --danger-soft:  rgba(239, 68, 68, 0.18);
 
   /* Derived shades */
   --pink-dark:    #c4387e;
@@ -363,9 +369,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 14px;
+  gap: 8px;
   border-radius: 9999px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   background: var(--glass-bg);
@@ -373,6 +380,7 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   order: 3;
+  overflow: hidden;
   transition: border-color 0.3s ease;
 }
 
@@ -416,9 +424,19 @@ body {
 
 .status-last-seen {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 500;
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+#statusText {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Glass Buttons */
@@ -542,6 +560,12 @@ body {
   border: 1px solid rgba(139, 92, 246, 0.3);
 }
 
+.badge-amber {
+  background: var(--amber-soft);
+  color: var(--amber-dark);
+  border: 1px solid var(--amber-border);
+}
+
 .badge-slate {
   background: rgba(90, 112, 128, 0.12);
   color: var(--text-muted);
@@ -549,7 +573,7 @@ body {
 }
 
 .badge-warning {
-  background: rgba(239, 68, 68, 0.18);
+  background: var(--danger-soft);
   color: #f87171;
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
@@ -742,6 +766,44 @@ body {
 
 .glass-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.35);
+}
+
+/* Downtime & Gap Row */
+.downtime-row {
+  background: rgba(222, 83, 157, 0.08) !important;
+}
+
+.downtime-row td {
+  padding: 10px 14px !important;
+  border-top: 1px dashed var(--pink-border);
+  border-bottom: 1px dashed var(--pink-border);
+}
+
+.downtime-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 0.74rem;
+  color: var(--pink);
+  letter-spacing: 0.01em;
+}
+
+.downtime-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 0 8px var(--pink-glow);
+}
+
+.icon-theme {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.glass-btn-icon:hover .icon-theme {
+  transform: rotate(20deg) scale(1.1);
 }
 
 /* ------------------------------------------------------------------------------

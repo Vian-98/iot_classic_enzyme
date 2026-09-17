@@ -19,6 +19,13 @@ $flashType = 'ok';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['_action'] ?? '';
 
+    // --- Simpan Pengaturan Sistem (Batas Waktu Offline) ---
+    if ($action === 'update_settings') {
+        $offlineTimeout = max(30, (int)($_POST['offline_timeout_seconds'] ?? 300));
+        setSetting('offline_timeout_seconds', (string)$offlineTimeout);
+        $flash = 'Batas waktu toleransi offline berhasil diperbarui menjadi ' . ($offlineTimeout >= 60 ? floor($offlineTimeout / 60) . ' menit' : $offlineTimeout . ' detik') . '.';
+    }
+
     // --- Simpan Threshold ---
     if ($action === 'save_threshold') {
         $deviceId = trim($_POST['device_id'] ?? 'esp32-ce-001');
@@ -387,11 +394,12 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         <!-- Navbar -->
         <header class="navbar-dock glass">
             <div class="brand-section">
-                <div class="brand-logo-glass">CE</div>
-                <div>
-                    <h1 class="brand-title">Admin Panel</h1>
-                    <div class="brand-subtitle">Konfigurasi Lanjutan</div>
-                </div>
+                <a href="admin.php" style="text-decoration:none; display:flex; align-items:center;">
+                    <div>
+                        <h1 class="brand-title">Admin Panel</h1>
+                        <div class="brand-subtitle">Konfigurasi Lanjutan</div>
+                    </div>
+                </a>
             </div>
             <div class="dock-controls">
                 <a href="index.php" class="glass-btn">Dashboard</a>
@@ -401,8 +409,8 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <span style="font-size:0.8rem; font-weight:700; color:var(--teal);"><?= $adminName ?></span>
                 </span>
                 <a href="logout.php" class="glass-btn" style="color:var(--pink); border-color:var(--pink-border);">Logout</a>
-                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme">
-                    <span id="themeIcon">D</span>
+                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
+                    <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
                 </button>
             </div>
         </header>

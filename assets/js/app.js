@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lastSeenTimestamp: null,
         lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
         pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
+        offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
         chartInstance: null,
         pollTimer: null,
         secondsTickerTimer: null,
@@ -33,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
         valPh: document.getElementById('valPh'),
         valAlcohol: document.getElementById('valAlcohol'),
         valRssi: document.getElementById('valRssi'),
-        valIp: document.getElementById('valIp'),
         valFirmware: document.getElementById('valFirmware'),
         badgeTemp: document.getElementById('badgeTemp'),
         badgePh: document.getElementById('badgePh'),
@@ -60,7 +60,13 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('ce_theme', theme);
 
         if (el.themeIcon) {
-            el.themeIcon.textContent = theme === 'dark' ? 'D' : 'L';
+            if (theme === 'dark') {
+                // Ikon Bulan (Moon SVG)
+                el.themeIcon.innerHTML = '<svg class="icon-theme" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+            } else {
+                // Ikon Matahari (Sun SVG)
+                el.themeIcon.innerHTML = '<svg class="icon-theme" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+            }
         }
 
         // Perbarui warna grid & font pada Chart.js jika sudah terbentuk
@@ -102,6 +108,11 @@ document.addEventListener('DOMContentLoaded', () => {
         gradPh.addColorStop(0, 'rgba(78, 191, 193, 0.22)');
         gradPh.addColorStop(1, 'rgba(78, 191, 193, 0.0)');
 
+        // Gradient untuk Alkohol (Amber #f59e0b)
+        const gradAlcohol = ctx.createLinearGradient(0, 0, 0, 300);
+        gradAlcohol.addColorStop(0, 'rgba(245, 158, 11, 0.22)');
+        gradAlcohol.addColorStop(1, 'rgba(245, 158, 11, 0.0)');
+
         state.chartInstance = new Chart(ctx, {
             type: 'line',
             data: {
@@ -119,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         pointRadius: 3,
                         pointBackgroundColor: '#de539d',
                         pointHoverRadius: 6,
+                        spanGaps: false, // Jeda waktu offline tidak disambung garis palsu
                     },
                     {
                         label: 'pH',
@@ -132,6 +144,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         pointRadius: 3,
                         pointBackgroundColor: '#4ebfc1',
                         pointHoverRadius: 6,
+                        spanGaps: false,
+                    },
+                    {
+                        label: 'Alkohol (ADC)',
+                        yAxisID: 'yAlcohol',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: gradAlcohol,
+                        borderWidth: 2.2,
+                        fill: true,
+                        tension: 0.38,
+                        pointRadius: 3,
+                        pointBackgroundColor: '#f59e0b',
+                        pointHoverRadius: 6,
+                        spanGaps: false,
                     }
                 ]
             },
@@ -181,6 +208,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         grid: { drawOnChartArea: false },
                         title: { display: true, text: 'pH', color: '#4ebfc1', font: { family: 'Outfit', weight: '600' } },
                         ticks: { color: textColor, font: { family: 'JetBrains Mono', size: 10 } }
+                    },
+                    yAlcohol: {
+                        type: 'linear',
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        title: { display: false, text: 'Alkohol (ADC)', color: '#f59e0b', font: { family: 'Outfit', weight: '600' } },
+                        ticks: { color: '#f59e0b', font: { family: 'JetBrains Mono', size: 9 } }
                     }
                 }
             }
@@ -199,6 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chart.options.scales.yTemp.grid.color = gridColor;
         chart.options.scales.yTemp.ticks.color = textColor;
         chart.options.scales.yPh.ticks.color = textColor;
+        chart.options.scales.yAlcohol.ticks.color = '#f59e0b';
         chart.options.plugins.legend.labels.color = textColor;
         chart.options.plugins.tooltip.backgroundColor = isDark ? 'rgba(15,22,35,0.90)' : 'rgba(255,255,255,0.96)';
         chart.options.plugins.tooltip.titleColor = isDark ? '#f0f8f8' : '#1a2332';
@@ -214,28 +249,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const now = Math.floor(Date.now() / 1000);
         const diff = Math.max(0, now - state.lastSeenTimestamp);
+        const timeout = state.offlineTimeout || 300;
 
-        let label = '';
-        if (diff < 5) {
-            label = 'Baru saja';
-        } else if (diff < 60) {
-            label = `${diff} detik lalu`;
-        } else if (diff < 3600) {
-            label = `${Math.floor(diff / 60)} menit lalu`;
-        } else {
-            label = `${Math.floor(diff / 3600)} jam lalu`;
+        // Format durasi waktu ringkas
+        function formatDiff(secs) {
+            if (secs < 5)   return 'Baru saja';
+            if (secs < 60)  return `${secs} detik lalu`;
+            if (secs < 3600) return `${Math.floor(secs / 60)} menit lalu`;
+            const h = Math.floor(secs / 3600);
+            const m = Math.floor((secs % 3600) / 60);
+            return m > 0 ? `${h} jam ${m} menit lalu` : `${h} jam lalu`;
         }
 
-        el.statusLastSeen.textContent = `Terakhir: ${label}`;
+        // Format durasi offline saja (tanpa "lalu")
+        function formatOfflineDuration(secs) {
+            if (secs < 60)  return `${secs} detik`;
+            if (secs < 3600) return `${Math.floor(secs / 60)} menit`;
+            const h = Math.floor(secs / 3600);
+            const m = Math.floor((secs % 3600) / 60);
+            return m > 0 ? `${h} jam ${m} menit` : `${h} jam`;
+        }
 
-        // Jika lebih dari 30 detik tanpa data, ubah badge menjadi OFFLINE secara dinamis
-        if (diff > 30) {
+        // Jika melebihi batas toleransi offline
+        if (diff > timeout) {
+            const offlineDuration = formatOfflineDuration(diff);
+            el.statusLastSeen.textContent = `Offline sejak ${formatOfflineDuration(diff)} yang lalu`;
             if (el.statusPill) {
                 el.statusPill.classList.remove('online');
                 el.statusPill.classList.add('offline');
             }
-            if (el.statusText) el.statusText.textContent = 'OFFLINE';
+            if (el.statusText) el.statusText.textContent = `OFFLINE · ${offlineDuration}`;
         } else {
+            el.statusLastSeen.textContent = `Terakhir: ${formatDiff(diff)}`;
             if (el.statusPill) {
                 el.statusPill.classList.remove('offline');
                 el.statusPill.classList.add('online');
@@ -267,6 +312,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (json.status === 'ok' && json.device) {
                 const dev = json.device;
                 const tel = json.telemetry;
+
+                // Sinkronkan batas toleransi offline dari server
+                if (json.offline_timeout_seconds) {
+                    state.offlineTimeout = json.offline_timeout_seconds;
+                }
 
                 // Simpan timestamp last seen
                 if (dev.last_seen) {
@@ -330,15 +380,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     if (el.valAlcohol) {
-                        const newAlcohol = tel.alcohol !== null ? tel.alcohol.toFixed(1) : '--';
+                        const newAlcohol = tel.alcohol !== null ? Math.round(tel.alcohol) : '--';
                         pulseOnChange(el.valAlcohol, newAlcohol);
                     }
                     if (el.badgeAlcohol && el.footerAlcohol) {
                         if (tel.alcohol !== null) {
-                            const isWarn = (th.alcohol?.max !== null && tel.alcohol > th.alcohol?.max);
-                            el.badgeAlcohol.textContent = isWarn ? 'ALERT' : 'GAS';
-                            el.badgeAlcohol.className = isWarn ? 'sensor-badge badge-warning' : 'sensor-badge badge-violet';
-                            el.footerAlcohol.textContent = formatThresholdRange(th.alcohol, 'ADC', 'Anaerob');
+                            const alcVal = tel.alcohol;
+                            const maxAlc = th.alcohol?.max || 800;
+                            let alcBadgeClass = 'sensor-badge badge-teal';
+                            let alcBadgeText = 'HALAL (AMAN)';
+                            if (alcVal > maxAlc) {
+                                alcBadgeClass = 'sensor-badge badge-pink';
+                                alcBadgeText = 'WASPADA (> ' + maxAlc + ')';
+                            } else if (alcVal >= 400) {
+                                alcBadgeClass = 'sensor-badge badge-amber';
+                                alcBadgeText = 'TRANSISI';
+                            }
+                            el.badgeAlcohol.className = alcBadgeClass;
+                            el.badgeAlcohol.textContent = alcBadgeText;
+                            el.footerAlcohol.textContent = 'Batas Maksimal: ≤ ' + maxAlc + ' ADC';
                         } else {
                             el.badgeAlcohol.textContent = 'OFF';
                             el.badgeAlcohol.className = 'sensor-badge badge-slate';
@@ -399,16 +459,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const labels = [];
         const tempData = [];
         const phData = [];
+        const alcoholData = [];
+
+        let prevEpoch = null;
+        const offlineGapThreshold = state.offlineTimeout || 300;
 
         records.forEach(row => {
+            const currentEpoch = row.epoch || (row.datetime ? Math.floor(new Date(row.datetime).getTime() / 1000) : null);
+
+            // DETEKSI GAP / PERIODE OFFLINE:
+            // Jika jeda waktu antar 2 titik data melebihi ambang batas offline (misal loncat 9 jam),
+            // sisipkan titik 'null' agar Chart.js MEMUTUS garis (blank gap) dan tidak menarik garis miring palsu!
+            if (prevEpoch !== null && currentEpoch !== null) {
+                const gapSeconds = currentEpoch - prevEpoch;
+                if (gapSeconds > offlineGapThreshold) {
+                    const gapHrs = Math.floor(gapSeconds / 3600);
+                    const gapMins = Math.floor((gapSeconds % 3600) / 60);
+                    const gapLabel = gapHrs > 0 ? `Offline ${gapHrs}j ${gapMins}m` : `Offline ${gapMins}m`;
+
+                    labels.push(gapLabel);
+                    tempData.push(null);
+                    phData.push(null);
+                    alcoholData.push(null);
+                }
+            }
+
             labels.push(row.time);
             tempData.push(row.temperature);
             phData.push(row.ph);
+            alcoholData.push(row.alcohol);
+
+            prevEpoch = currentEpoch;
         });
 
         state.chartInstance.data.labels = labels;
         state.chartInstance.data.datasets[0].data = tempData;
         state.chartInstance.data.datasets[1].data = phData;
+        if (state.chartInstance.data.datasets[2]) {
+            state.chartInstance.data.datasets[2].data = alcoholData;
+        }
         state.chartInstance.update('none');
     }
 
@@ -428,20 +517,50 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render 10 baris terakhir dalam urutan menurun (terbaru di atas)
         const recentRows = [...records].reverse().slice(0, 10);
+        let tableHtml = '';
+        let prevEpoch = null;
+        const offlineThreshold = state.offlineTimeout || 300;
 
-        el.historyTableBody.innerHTML = recentRows.map(row => `
-            <tr>
-                <td>
-                    <strong>${escapeHtml(row.time)}</strong>
-                    <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
-                </td>
-                <td><span style="color:var(--pink); font-weight:700;">${row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
-                <td><span style="color:var(--teal); font-weight:700;">${row.ph !== null ? row.ph : '--'}</span></td>
-                <td><span style="color:var(--violet); font-weight:700;">${row.alcohol !== null ? row.alcohol : '--'}</span></td>
-                <td>${row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
-                <td><span class="sensor-badge badge-teal" style="font-size:0.65rem;">VALID</span></td>
-            </tr>
-        `).join('');
+        recentRows.forEach(row => {
+            const currentEpoch = row.epoch || (row.datetime ? Math.floor(new Date(row.datetime).getTime() / 1000) : null);
+
+            // Deteksi downtime antar data berturut-turut di tabel
+            if (prevEpoch !== null && currentEpoch !== null) {
+                const gapSeconds = prevEpoch - currentEpoch; // urutan menurun (newest first)
+                if (gapSeconds > offlineThreshold) {
+                    const gapHrs = Math.floor(gapSeconds / 3600);
+                    const gapMins = Math.floor((gapSeconds % 3600) / 60);
+                    const gapLabel = gapHrs > 0 ? `${gapHrs} jam ${gapMins} menit` : `${gapMins} menit`;
+                    tableHtml += `
+                        <tr class="downtime-row">
+                            <td colspan="6">
+                                <div class="downtime-badge">
+                                    <span class="downtime-dot"></span>
+                                    <span><strong>PERANGKAT OFFLINE</strong> selama <strong>${gapLabel}</strong></span>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+            }
+            prevEpoch = currentEpoch;
+
+            tableHtml += `
+                <tr>
+                    <td>
+                        <strong>${escapeHtml(row.time)}</strong>
+                        <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
+                    </td>
+                    <td><span style="color:var(--pink); font-weight:700;">${row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
+                    <td><span style="color:var(--teal); font-weight:700;">${row.ph !== null ? row.ph : '--'}</span></td>
+                    <td><span style="color:var(--amber); font-weight:700;">${row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span></td>
+                    <td>${row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
+                    <td><span class="sensor-badge badge-teal" style="font-size:0.65rem;">VALID</span></td>
+                </tr>
+            `;
+        });
+
+        el.historyTableBody.innerHTML = tableHtml;
     }
 
     // --------------------------------------------------------------------------

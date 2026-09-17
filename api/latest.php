@@ -60,18 +60,34 @@ try {
     $latestTelemetry = $stmtTel->fetch();
 
     // 3. Kalkulasi 'Kapan Terakhir Diterima' & Status Online/Offline
+    $offlineTimeout = (int)getSetting('offline_timeout_seconds', 300);
     $lastSeen = $device['last_seen'] ?: ($latestTelemetry['received_at'] ?? null);
     $secondsAgo = null;
     $isOnline = false;
     $relativeTime = 'Belum pernah ada data';
+    $offlineDurationSeconds = 0;
+    $offlineDurationLabel = null;
 
     if ($lastSeen) {
         $lastSeenTs = strtotime($lastSeen);
         $secondsAgo = max(0, time() - $lastSeenTs);
         $relativeTime = formatRelativeTime($lastSeen);
         
-        // Timeout batas offline: jika lebih dari 30 detik tidak ada kiriman data
-        $isOnline = ($secondsAgo <= 30);
+        // Perangkat dianggap online jika selisih waktu <= ambang batas offline
+        $isOnline = ($secondsAgo <= $offlineTimeout);
+
+        if (!$isOnline) {
+            $offlineDurationSeconds = $secondsAgo;
+            $hrs = floor($secondsAgo / 3600);
+            $mins = floor(($secondsAgo % 3600) / 60);
+            if ($hrs > 0) {
+                $offlineDurationLabel = "{$hrs} jam {$mins} menit";
+            } elseif ($mins > 0) {
+                $offlineDurationLabel = "{$mins} menit";
+            } else {
+                $offlineDurationLabel = "{$secondsAgo} detik";
+            }
+        }
     }
 
     // 4. Hitung alarm aktif/belum di-acknowledge
@@ -83,9 +99,9 @@ try {
     $stmtThresh = $db->prepare("SELECT param, val_min, val_max FROM thresholds WHERE device_id = ?");
     $stmtThresh->execute([$targetDevId]);
     $thresholdsMap = [
-        'temp'    => ['min' => 30.0, 'max' => 38.0],
-        'ph'      => ['min' => 3.2, 'max' => 4.5],
-        'alcohol' => ['min' => null, 'max' => null]
+        'temp'    => ['min' => 20.0, 'max' => 40.0],
+        'ph'      => ['min' => 3.0, 'max' => 4.5],
+        'alcohol' => ['min' => null, 'max' => 800.0]
     ];
     while ($t = $stmtThresh->fetch()) {
         $thresholdsMap[$t['param']] = [
@@ -99,6 +115,7 @@ try {
     echo json_encode([
         'status' => 'ok',
         'server_time' => date('Y-m-d H:i:s'),
+        'offline_timeout_seconds' => $offlineTimeout,
         'device' => [
             'device_id' => $device['device_id'],
             'device_name' => $device['device_name'],
@@ -107,6 +124,8 @@ try {
             'seconds_ago' => $secondsAgo,
             'relative_time' => $relativeTime,
             'is_online' => $isOnline,
+            'offline_duration_seconds' => $offlineDurationSeconds,
+            'offline_duration_label' => $offlineDurationLabel,
             'active_alarms' => $alarmCount
         ],
         'thresholds' => $thresholdsMap,

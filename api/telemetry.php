@@ -94,7 +94,11 @@ $rawAdc  = isset($data['raw_adc']) && is_numeric($data['raw_adc']) ? (int)$data[
 $rssi        = isset($data['rssi']) && is_numeric($data['rssi']) ? (int)$data['rssi'] : null;
 $firmwareVer = isset($data['firmware']) ? substr(trim($data['firmware']), 0, 20) : '1.0.0';
 $deviceTs    = isset($data['ts']) && is_numeric($data['ts']) ? (int)$data['ts'] : null;
-$ipAddress   = $_SERVER['REMOTE_ADDR'] ?? null;
+// Deteksi IP Address asli pengirim (Support Cloudflare Tunnel / Reverse Proxy / LAN)
+$ipAddress = $_SERVER['HTTP_CF_CONNECTING_IP'] 
+          ?? (!empty($_SERVER['HTTP_X_FORWARDED_FOR']) ? trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]) : null)
+          ?? $_SERVER['REMOTE_ADDR'] 
+          ?? null;
 
 $serverTime = date('Y-m-d H:i:s');
 

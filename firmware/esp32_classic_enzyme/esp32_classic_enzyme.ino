@@ -28,6 +28,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 // ==============================================================================
 // 1. KONFIGURASI JARINGAN & SERVER BACKEND
@@ -229,7 +230,10 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
 
   digitalWrite(PIN_LED_BUILTIN, HIGH);
 
-  WiFiClient client;
+  // Gunakan WiFiClientSecure untuk koneksi HTTPS (Cloudflare)
+  WiFiClientSecure client;
+  client.setInsecure(); // Skip verifikasi sertifikat SSL agar hemat memori di ESP32
+
   HTTPClient http;
 
   Serial.printf("[HTTP] Mengirim POST ke: %s\n", SERVER_URL);

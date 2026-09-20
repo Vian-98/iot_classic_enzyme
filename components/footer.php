@@ -5,6 +5,6 @@
  */
 ?>
 <footer class="footer-bar glass">
-    <div><strong>Classic Enzyme IoT</strong> · Bioreactor Fermentation Monitor</div>
+    <div><strong>Classic Enzyme IoT</strong> · Fermentation Monitor</div>
     <div id="footerTime" style="font-family:var(--font-mono); color:var(--text-muted); font-size:0.75rem;"></div>
 </footer>

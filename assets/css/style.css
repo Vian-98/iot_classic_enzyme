@@ -631,20 +631,21 @@ body {
 }
 
 /* ------------------------------------------------------------------------------
-   7. SENSOR METRIC CARDS (Mobile: 1 col stack)
+   7. SENSOR METRIC CARDS (Mobile: compact 2 x 2 grid)
    ------------------------------------------------------------------------------ */
 .metric-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .sensor-card {
-  padding: 16px 18px 14px;
+  min-width: 0;
+  padding: 12px 12px 10px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 150px;
+  min-height: 132px;
   border-top: 3px solid var(--teal); /* Default top accent */
 }
 
@@ -668,30 +669,39 @@ body {
 }
 
 .sensor-meta {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
 .sensor-title {
-  font-size: 0.8rem;
+  overflow: hidden;
+  font-size: 0.68rem;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-hardware {
+  overflow: hidden;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.56rem;
   color: var(--text-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Sensor Badges */
 .sensor-badge {
-  padding: 3px 9px;
+  flex: 0 0 auto;
+  padding: 2px 6px;
   border-radius: 9999px;
-  font-size: 0.66rem;
+  font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -737,20 +747,23 @@ body {
 .sensor-value-area {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin: 8px 0 14px;
+  gap: 5px;
+  margin: 7px 0 9px;
 }
 
 .sensor-value {
-  font-size: 2.65rem;
+  overflow: hidden;
+  font-size: 1.8rem;
   font-weight: 800;
   font-family: var(--font-mono);
   letter-spacing: -0.04em;
   line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sensor-unit {
-  font-size: 1rem;
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-muted);
   font-family: var(--font-sans);
@@ -760,18 +773,49 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 10px;
+  gap: 5px;
+  padding-top: 7px;
   border-top: 1px solid var(--glass-border-2);
-  font-size: 0.72rem;
+  font-size: 0.58rem;
   color: var(--text-muted);
   font-weight: 500;
 }
 
 .range-pill {
+  overflow: hidden;
   font-family: var(--font-mono);
   color: var(--text-main);
   font-weight: 600;
-  font-size: 0.72rem;
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.glass-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--text-main);
+  font: 500 0.82rem var(--font-sans);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border-2);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.glass-input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--teal-soft);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
 
 /* Per-sensor accent colors */

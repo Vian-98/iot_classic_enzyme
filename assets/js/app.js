@@ -494,14 +494,19 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchHistoryData() {
         try {
             const res = await fetch(`api/history.php?device_id=${encodeURIComponent(state.currentDeviceId)}&range=${state.chartRange}&limit=40`);
-            const json = await res.json();
+            const json = await res.json().catch(() => ({}));
 
-            if (json.status === 'ok' && Array.isArray(json.data)) {
+            if (!res.ok || json.status !== 'ok') {
+                throw new Error(json.message || `HTTP ${res.status}`);
+            }
+
+            if (Array.isArray(json.data)) {
                 updateChartData(json.data);
                 updateHistoryTable(json.data);
             }
         } catch (err) {
             console.warn('Gagal memuat histori grafik:', err);
+            showToast(`Gagal memuat histori: ${err.message}`, 'error');
         }
     }
 

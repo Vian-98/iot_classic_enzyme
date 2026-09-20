@@ -20,7 +20,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Classic Enzyme IoT — Bioreactor Monitor</title>
+    <title>Classic Enzyme IoT — Fermentation Monitor</title>
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
     <!-- Chart.js via CDN (Zero-build) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>

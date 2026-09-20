@@ -11,7 +11,55 @@ $db = getDB();
 $deviceId = trim($_GET['device_id'] ?? 'esp32-ce-001');
 $range    = trim($_GET['range'] ?? '24h');
 $limit    = min(500, max(10, (int)($_GET['limit'] ?? 100)));
+$page     = max(1, (int)($_GET['page'] ?? 1));
+$startDate = trim($_GET['start_date'] ?? '');
+$endDate = trim($_GET['end_date'] ?? '');
+$status = strtolower(trim($_GET['status'] ?? 'all'));
 $action   = $_GET['action'] ?? '';
+
+if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) $startDate = '';
+if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) $endDate = '';
+if (!in_array($status, ['all', 'valid', 'invalid'], true)) $status = 'all';
+
+$filters = [
+    'device_id' => $deviceId,
+    'range' => $range,
+    'limit' => $limit,
+    'start_date' => $startDate,
+    'end_date' => $endDate,
+    'status' => $status,
+];
+$filterQuery = http_build_query(array_filter($filters, static fn($value) => $value !== ''));
+
+function buildTelemetryFilters(PDO $db, string $deviceId, string $range, string $startDate, string $endDate, string $status): array {
+    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+    $validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
+    $validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
+    $conditions = ['device_id = ?'];
+    $params = [$deviceId];
+
+    $rangeSql = [
+        '1h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '1 hour'", 'sqlite' => "received_at >= datetime('now', '-1 hour', 'localtime')"],
+        '6h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '6 hours'", 'sqlite' => "received_at >= datetime('now', '-6 hours', 'localtime')"],
+        '24h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '24 hours'", 'sqlite' => "received_at >= datetime('now', '-24 hours', 'localtime')"],
+        '7d' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)", 'pgsql' => "received_at >= NOW() - INTERVAL '7 days'", 'sqlite' => "received_at >= datetime('now', '-7 days', 'localtime')"],
+    ];
+    if (isset($rangeSql[$range])) {
+        $conditions[] = $rangeSql[$range][$driver === 'sqlite' ? 'sqlite' : $driver];
+    }
+    if ($startDate !== '') {
+        $conditions[] = 'received_at >= ?';
+        $params[] = $startDate . ' 00:00:00';
+    }
+    if ($endDate !== '') {
+        $conditions[] = 'received_at < ?';
+        $params[] = (new DateTimeImmutable($endDate . ' 00:00:00'))->modify('+1 day')->format('Y-m-d H:i:s');
+    }
+    if ($status === 'valid') $conditions[] = "is_valid = {$validTrue}";
+    if ($status === 'invalid') $conditions[] = "is_valid = {$validFalse}";
+
+    return [implode(' AND ', $conditions), $params];
+}
 
 // Handle CSV Export
 if ($action === 'export_csv') {
@@ -34,8 +82,9 @@ if ($action === 'export_csv') {
     // Escape eksplisit agar kompatibel dengan PHP 8.4+ dan output CSV bersih.
     fputcsv($output, $headers, ',', '"', '');
 
-    $stmtExport = $db->prepare("SELECT * FROM telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 5000");
-    $stmtExport->execute([$deviceId]);
+    [$exportCondition, $exportParams] = buildTelemetryFilters($db, $deviceId, $range, $startDate, $endDate, $status);
+    $stmtExport = $db->prepare("SELECT * FROM telemetry WHERE {$exportCondition} ORDER BY received_at DESC LIMIT 5000");
+    $stmtExport->execute($exportParams);
     while ($row = $stmtExport->fetch()) {
         $csvRow = [
             $row['id'],
@@ -67,7 +116,10 @@ try {
 
 // Query Data with date filter (detect active driver: PostgreSQL / MySQL / SQLite)
 $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+$validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
+$validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
 $timeCondition = '';
+$params = [$deviceId];
 if ($range === '1h') {
     if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)";
     elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '1 hour'";
@@ -86,15 +138,32 @@ if ($range === '1h') {
     else                          $timeCondition = "AND received_at >= datetime('now', '-7 days', 'localtime')";
 }
 
+if ($startDate !== '') {
+    $timeCondition .= ' AND received_at >= ?';
+    $params[] = $startDate . ' 00:00:00';
+}
+if ($endDate !== '') {
+    $endExclusive = (new DateTimeImmutable($endDate . ' 00:00:00'))->modify('+1 day')->format('Y-m-d H:i:s');
+    $timeCondition .= ' AND received_at < ?';
+    $params[] = $endExclusive;
+}
+if ($status === 'valid') $timeCondition .= " AND is_valid = {$validTrue}";
+if ($status === 'invalid') $timeCondition .= " AND is_valid = {$validFalse}";
+
+$countStmt = $db->prepare("SELECT COUNT(*) FROM telemetry WHERE device_id = ? {$timeCondition}");
+$countStmt->execute($params);
+$totalRecords = (int)$countStmt->fetchColumn();
+$totalPages = max(1, (int)ceil($totalRecords / $limit));
+$page = min($page, $totalPages);
+$offset = ($page - 1) * $limit;
+
 $stmt = $db->prepare("
     SELECT * FROM telemetry 
     WHERE device_id = ? {$timeCondition} 
-    ORDER BY received_at DESC 
-    LIMIT ?
+    ORDER BY received_at DESC, id DESC
+    LIMIT {$limit} OFFSET {$offset}
 ");
-$stmt->bindValue(1, $deviceId, PDO::PARAM_STR);
-$stmt->bindValue(2, $limit, PDO::PARAM_INT);
-$stmt->execute();
+$stmt->execute($params);
 $records = $stmt->fetchAll();
 
 // Statistik hanya menggunakan pembacaan yang lolos validasi transport.
@@ -104,7 +173,7 @@ $phs      = array_filter(array_column($validRecords, 'ph'), fn($v) => $v !== nul
 $alcohols = array_filter(array_column($validRecords, 'alcohol'), fn($v) => $v !== null);
 
 $stats = [
-    'count'       => count($records),
+    'count'       => $totalRecords,
     'temp_avg'    => !empty($temps)    ? round(array_sum($temps) / count($temps), 2) : '--',
     'temp_min'    => !empty($temps)    ? min($temps) : '--',
     'temp_max'    => !empty($temps)    ? max($temps) : '--',
@@ -164,7 +233,7 @@ $stats = [
                 </div>
                 <div class="navbar-row-1-actions">
                     <a href="index.php" class="glass-btn nav-desktop-only">Dashboard</a>
-                    <a href="?device_id=<?= urlencode($deviceId) ?>&range=<?= urlencode($range) ?>&action=export_csv" class="glass-btn nav-desktop-only">Ekspor CSV</a>
+                    <a href="?<?= htmlspecialchars($filterQuery) ?>&action=export_csv" class="glass-btn nav-desktop-only">Ekspor CSV</a>
                     <?php if (isAdminLoggedIn()): ?>
                     <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
                     <?php else: ?>
@@ -177,7 +246,7 @@ $stats = [
             </div>
             <!-- Row 2: Ekspor CSV (mobile visible) -->
             <div class="navbar-row-2">
-                <a href="?device_id=<?= urlencode($deviceId) ?>&range=<?= urlencode($range) ?>&action=export_csv" class="glass-btn" style="font-size:0.8rem;">⬇ Ekspor CSV</a>
+                <a href="?<?= htmlspecialchars($filterQuery) ?>&action=export_csv" class="glass-btn" style="font-size:0.8rem;">⬇ Ekspor CSV</a>
             </div>
         </header>
 
@@ -207,7 +276,26 @@ $stats = [
                 </div>
 
                 <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">BATAS BARIS</label>
+                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">DARI TANGGAL</label>
+                    <input type="date" name="start_date" value="<?= htmlspecialchars($startDate) ?>" class="glass-input">
+                </div>
+
+                <div>
+                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">SAMPAI TANGGAL</label>
+                    <input type="date" name="end_date" value="<?= htmlspecialchars($endDate) ?>" class="glass-input">
+                </div>
+
+                <div>
+                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">STATUS DATA</label>
+                    <select name="status" class="glass-select">
+                        <option value="all" <?= $status === 'all' ? 'selected' : '' ?>>Semua Data</option>
+                        <option value="valid" <?= $status === 'valid' ? 'selected' : '' ?>>Valid</option>
+                        <option value="invalid" <?= $status === 'invalid' ? 'selected' : '' ?>>Invalid</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">PER HALAMAN</label>
                     <select name="limit" class="glass-select" onchange="this.form.submit()">
                         <option value="50" <?= $limit == 50 ? 'selected' : '' ?>>50 Baris</option>
                         <option value="100" <?= $limit == 100 ? 'selected' : '' ?>>100 Baris</option>
@@ -279,11 +367,21 @@ $stats = [
                     <span class="sensor-unit">sampel</span>
                 </div>
                 <div class="sensor-footer">
-                    <span>Rentang: <?= htmlspecialchars($range) ?></span>
+                    <span>Halaman <?= $page ?>/<?= $totalPages ?></span>
                     <span><?= htmlspecialchars($deviceId) ?></span>
                 </div>
             </div>
         </section>
+
+        <nav class="pagination" aria-label="Navigasi halaman riwayat">
+            <?php if ($page > 1): ?>
+                <a class="glass-btn" href="?<?= htmlspecialchars(http_build_query(array_merge($filters, ['page' => $page - 1]))) ?>">← Sebelumnya</a>
+            <?php endif; ?>
+            <span>Menampilkan <?= count($records) ?> dari <?= $totalRecords ?> data</span>
+            <?php if ($page < $totalPages): ?>
+                <a class="glass-btn" href="?<?= htmlspecialchars(http_build_query(array_merge($filters, ['page' => $page + 1]))) ?>">Berikutnya →</a>
+            <?php endif; ?>
+        </nav>
 
         <!-- History Table Section -->
         <section class="glass table-section">

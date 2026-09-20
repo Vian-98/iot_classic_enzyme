@@ -7,6 +7,8 @@
  *   - range (string: 1h, 6h, 24h, 7d, all; default: 1h)
  *   - limit (int: default 60, max 1000)
  *   - order (string: asc, desc; default: asc)
+ *   - start_date/end_date (YYYY-MM-DD, optional)
+ *   - status (all, valid, invalid, optional)
  * 
  * Mengembalikan array historis untuk konsumsi Chart.js dan tabel riwayat.
  */
@@ -26,14 +28,35 @@ $deviceId = trim($_GET['device_id'] ?? 'esp32-ce-001');
 $range    = trim($_GET['range'] ?? '1h');
 $limit    = min(1000, max(10, (int)($_GET['limit'] ?? 60)));
 $order    = strtolower(trim($_GET['order'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
+$startDate = trim($_GET['start_date'] ?? '');
+$endDate = trim($_GET['end_date'] ?? '');
+$status = strtolower(trim($_GET['status'] ?? 'all'));
 
 $db = getDB();
+
+function respond(int $statusCode, string $status, string $message): never {
+    http_response_code($statusCode);
+    echo json_encode(['status' => $status, 'message' => $message], JSON_UNESCAPED_SLASHES);
+    exit;
+}
 
 // Tentukan filter interval waktu
 $timeCondition = '';
 $params = [$deviceId];
 
 $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+$validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
+$validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
+
+if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
+    respond(400, 'error', 'start_date harus berformat YYYY-MM-DD');
+}
+if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
+    respond(400, 'error', 'end_date harus berformat YYYY-MM-DD');
+}
+if ($status !== 'all' && !in_array($status, ['valid', 'invalid'], true)) {
+    respond(400, 'error', 'status tidak valid');
+}
 
 switch ($range) {
     case '1h':
@@ -60,6 +83,21 @@ switch ($range) {
     default:
         $timeCondition = '';
         break;
+}
+
+if ($startDate !== '') {
+    $timeCondition .= ' AND received_at >= ?';
+    $params[] = $startDate . ' 00:00:00';
+}
+if ($endDate !== '') {
+    $endExclusive = (new DateTimeImmutable($endDate . ' 00:00:00'))->modify('+1 day')->format('Y-m-d H:i:s');
+    $timeCondition .= ' AND received_at < ?';
+    $params[] = $endExclusive;
+}
+if ($status === 'valid') {
+    $timeCondition .= " AND is_valid = {$validTrue}";
+} elseif ($status === 'invalid') {
+    $timeCondition .= " AND is_valid = {$validFalse}";
 }
 
 try {

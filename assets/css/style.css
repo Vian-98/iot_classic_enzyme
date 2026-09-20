@@ -37,6 +37,13 @@
   --teal-dark:    #37a3a5;
   --violet:       #8b5cf6;
   --violet-soft:  rgba(139, 92, 246, 0.18);
+  --pink-text:    #a92d6d;
+  --teal-text:    #167679;
+  --violet-text:  #6331bd;
+  --accent-on-pink: #2c0d20;
+  --accent-on-teal: #062a2b;
+  --accent-on-danger: #2b0000;
+  --danger-text: #b42318;
 
   /* Glassmorphism Surface (Light Mode) */
   --glass-bg:       rgba(255, 255, 255, 0.65);
@@ -50,7 +57,7 @@
   /* Text */
   --text-main:   #1a2332;
   --text-muted:  #5a7080;
-  --text-subtle: #98afbb;
+  --text-subtle: #607884;
 
   /* Background gradients (orbs) */
   --bg-base: var(--base);
@@ -89,7 +96,11 @@
   /* Text */
   --text-main:   #f0f8f8;
   --text-muted:  #7fa8b0;
-  --text-subtle: #4d7080;
+  --text-subtle: #6d99a3;
+  --pink-text:    #f17ab8;
+  --teal-text:    #7bdcdd;
+  --violet-text:  #bda4ff;
+  --danger-text: #ff8a80;
 
   /* Orbs are more saturated in dark */
   --orb-1: #de539d;
@@ -317,7 +328,7 @@ body {
   justify-content: center;
   font-size: 0.85rem;
   font-weight: 800;
-  color: #fff;
+  color: var(--accent-on-teal);
   letter-spacing: 0.01em;
   box-shadow: 0 4px 14px var(--teal-glow);
 }
@@ -433,14 +444,14 @@ body {
 .filter-status-btn[data-histfilter="valid"].active,
 .filter-status-btn[data-tablefilter="valid"].active {
   background: var(--teal);
-  color: #fff;
+  color: var(--accent-on-teal);
 }
 
 .filter-status-btn[data-status="offline"].active,
 .filter-status-btn[data-histfilter="offline"].active,
 .filter-status-btn[data-tablefilter="offline"].active {
   background: var(--pink);
-  color: #fff;
+  color: var(--accent-on-pink);
 }
 
 .filter-dot {
@@ -617,13 +628,13 @@ body {
 }
 
 .bottom-nav-item.active {
-  color: var(--teal);
+  color: var(--teal-text);
   font-weight: 700;
 }
 
 .bottom-nav-item.active svg {
   transform: scale(1.12);
-  stroke: var(--teal);
+  stroke: var(--teal-text);
 }
 
 .bottom-nav-item:active {
@@ -709,19 +720,19 @@ body {
 
 .badge-pink {
   background: var(--pink-soft);
-  color: var(--pink-dark);
+  color: var(--pink-text);
   border: 1px solid var(--pink-border);
 }
 
 .badge-teal {
   background: var(--teal-soft);
-  color: var(--teal-dark);
+  color: var(--teal-text);
   border: 1px solid var(--teal-border);
 }
 
 .badge-violet {
   background: var(--violet-soft);
-  color: var(--violet);
+  color: var(--violet-text);
   border: 1px solid rgba(139, 92, 246, 0.3);
 }
 
@@ -739,7 +750,7 @@ body {
 
 .badge-warning {
   background: var(--danger-soft);
-  color: #f87171;
+  color: var(--danger-text);
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
 
@@ -819,9 +830,9 @@ body {
 }
 
 /* Per-sensor accent colors */
-.card-temp .sensor-value    { color: var(--pink); }
-.card-ph .sensor-value      { color: var(--teal); }
-.card-alcohol .sensor-value { color: var(--violet); }
+.card-temp .sensor-value    { color: var(--pink-text); }
+.card-ph .sensor-value      { color: var(--teal-text); }
+.card-alcohol .sensor-value { color: var(--violet-text); }
 
 /* ------------------------------------------------------------------------------
    8. CHART SECTION (Mobile First)
@@ -884,7 +895,7 @@ body {
 
 .chart-tab-btn.active {
   background: var(--teal);
-  color: #fff;
+  color: var(--accent-on-teal);
   border: 1px solid var(--teal);
   font-weight: 700;
 }
@@ -967,7 +978,7 @@ body {
 
 .table-card-rel {
   font-size: 0.68rem;
-  color: var(--teal);
+  color: var(--teal-text);
   background: var(--teal-soft);
   padding: 2px 7px;
   border-radius: 9999px;
@@ -1008,8 +1019,8 @@ body {
   font-family: var(--font-mono);
 }
 
-.table-card-metric-value.temp { color: var(--pink); }
-.table-card-metric-value.ph { color: var(--teal); }
+.table-card-metric-value.temp { color: var(--pink-text); }
+.table-card-metric-value.ph { color: var(--teal-text); }
 .table-card-metric-value.alc { color: var(--amber); }
 
 .table-card-footer {
@@ -1030,7 +1041,7 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 0.74rem;
-  color: var(--pink);
+  color: var(--pink-text);
 }
 
 .table-responsive {
@@ -1095,7 +1106,7 @@ body {
   gap: 8px;
   font-family: var(--font-sans);
   font-size: 0.74rem;
-  color: var(--pink);
+  color: var(--pink-text);
   letter-spacing: 0.01em;
 }
 

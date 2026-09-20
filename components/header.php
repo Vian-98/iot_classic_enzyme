@@ -19,7 +19,7 @@
         <div class="navbar-row-1-actions">
             <a href="history.php" class="glass-btn nav-desktop-only">Riwayat</a>
             <?php if (isAdminLoggedIn()): ?>
-            <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
+            <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal-text); border-color:var(--teal-border);">Admin</a>
             <?php else: ?>
             <a href="login.php" class="glass-btn nav-desktop-only" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
             <?php endif; ?>

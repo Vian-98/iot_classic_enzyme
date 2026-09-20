@@ -87,7 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center;
             font-size: 1.1rem;
             font-weight: 800;
-            color: #fff;
+            color: var(--accent-on-teal);
             letter-spacing: -0.03em;
         }
 
@@ -171,7 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .login-error {
             background: var(--pink-soft);
             border: 1px solid var(--pink-border);
-            color: var(--pink-dark);
+            color: var(--pink-text);
             border-radius: var(--radius-sm);
             padding: 10px 14px;
             font-size: 0.82rem;
@@ -183,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             width: 100%;
             height: 48px;
             background: var(--teal);
-            color: #fff;
+            color: var(--accent-on-teal);
             border: none;
             border-radius: var(--radius-md);
             font-family: var(--font-sans);
@@ -214,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         .login-back:hover {
-            color: var(--teal);
+            color: var(--teal-text);
         }
 
         .login-note {

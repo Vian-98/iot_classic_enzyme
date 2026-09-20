@@ -58,31 +58,13 @@ if ($status !== 'all' && !in_array($status, ['valid', 'invalid'], true)) {
     respond(400, 'error', 'status tidak valid');
 }
 
-switch ($range) {
-    case '1h':
-        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)";
-        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '1 hour'";
-        else                          $timeCondition = "AND received_at >= datetime('now', '-1 hour', 'localtime')";
-        break;
-    case '6h':
-        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)";
-        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '6 hours'";
-        else                          $timeCondition = "AND received_at >= datetime('now', '-6 hours', 'localtime')";
-        break;
-    case '24h':
-        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)";
-        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '24 hours'";
-        else                          $timeCondition = "AND received_at >= datetime('now', '-24 hours', 'localtime')";
-        break;
-    case '7d':
-        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
-        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '7 days'";
-        else                          $timeCondition = "AND received_at >= datetime('now', '-7 days', 'localtime')";
-        break;
-    case 'all':
-    default:
-        $timeCondition = '';
-        break;
+$rangeHours = ['1h' => 1, '6h' => 6, '24h' => 24, '7d' => 24 * 7];
+if (isset($rangeHours[$range])) {
+    $cutoff = (new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta')))
+        ->modify("-{$rangeHours[$range]} hours")
+        ->format('Y-m-d H:i:s');
+    $timeCondition = ' AND received_at >= ?';
+    $params[] = $cutoff;
 }
 
 if ($startDate !== '') {

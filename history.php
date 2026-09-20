@@ -15,15 +15,46 @@ $page     = max(1, (int)($_GET['page'] ?? 1));
 $startDate = trim($_GET['start_date'] ?? '');
 $endDate = trim($_GET['end_date'] ?? '');
 $status = strtolower(trim($_GET['status'] ?? 'all'));
+$preset = strtolower(trim($_GET['preset'] ?? 'custom'));
 $action   = $_GET['action'] ?? '';
 
 if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) $startDate = '';
 if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) $endDate = '';
 if (!in_array($status, ['all', 'valid', 'invalid'], true)) $status = 'all';
+$validPresets = ['today', '7d', 'this_month', 'last_month', 'all', 'custom'];
+if (!in_array($preset, $validPresets, true)) $preset = 'custom';
+
+$appToday = new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta'));
+if ($preset === 'today') {
+    $range = 'all';
+    $startDate = $appToday->format('Y-m-d');
+    $endDate = $startDate;
+} elseif ($preset === '7d') {
+    $range = '7d';
+    $startDate = '';
+    $endDate = '';
+} elseif ($preset === 'this_month') {
+    $range = 'all';
+    $startDate = $appToday->modify('first day of this month')->format('Y-m-d');
+    $endDate = $appToday->format('Y-m-d');
+} elseif ($preset === 'last_month') {
+    $range = 'all';
+    $lastMonth = $appToday->modify('first day of last month');
+    $startDate = $lastMonth->format('Y-m-d');
+    $endDate = $lastMonth->modify('last day of this month')->format('Y-m-d');
+} elseif ($preset === 'all') {
+    $range = 'all';
+    $startDate = '';
+    $endDate = '';
+}
+if ($startDate !== '' && $endDate !== '' && $endDate < $startDate) {
+    [$startDate, $endDate] = [$endDate, $startDate];
+}
 
 $filters = [
     'device_id' => $deviceId,
     'range' => $range,
+    'preset' => $preset,
     'limit' => $limit,
     'start_date' => $startDate,
     'end_date' => $endDate,
@@ -38,14 +69,13 @@ function buildTelemetryFilters(PDO $db, string $deviceId, string $range, string 
     $conditions = ['device_id = ?'];
     $params = [$deviceId];
 
-    $rangeSql = [
-        '1h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '1 hour'", 'sqlite' => "received_at >= datetime('now', '-1 hour', 'localtime')"],
-        '6h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '6 hours'", 'sqlite' => "received_at >= datetime('now', '-6 hours', 'localtime')"],
-        '24h' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)", 'pgsql' => "received_at >= NOW() - INTERVAL '24 hours'", 'sqlite' => "received_at >= datetime('now', '-24 hours', 'localtime')"],
-        '7d' => ['mysql' => "received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)", 'pgsql' => "received_at >= NOW() - INTERVAL '7 days'", 'sqlite' => "received_at >= datetime('now', '-7 days', 'localtime')"],
-    ];
-    if (isset($rangeSql[$range])) {
-        $conditions[] = $rangeSql[$range][$driver === 'sqlite' ? 'sqlite' : $driver];
+    $rangeHours = ['1h' => 1, '6h' => 6, '24h' => 24, '7d' => 24 * 7];
+    if (isset($rangeHours[$range])) {
+        $cutoff = (new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta')))
+            ->modify("-{$rangeHours[$range]} hours")
+            ->format('Y-m-d H:i:s');
+        $conditions[] = 'received_at >= ?';
+        $params[] = $cutoff;
     }
     if ($startDate !== '') {
         $conditions[] = 'received_at >= ?';
@@ -120,22 +150,13 @@ $validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
 $validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
 $timeCondition = '';
 $params = [$deviceId];
-if ($range === '1h') {
-    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)";
-    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '1 hour'";
-    else                          $timeCondition = "AND received_at >= datetime('now', '-1 hour', 'localtime')";
-} elseif ($range === '6h') {
-    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)";
-    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '6 hours'";
-    else                          $timeCondition = "AND received_at >= datetime('now', '-6 hours', 'localtime')";
-} elseif ($range === '24h') {
-    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)";
-    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '24 hours'";
-    else                          $timeCondition = "AND received_at >= datetime('now', '-24 hours', 'localtime')";
-} elseif ($range === '7d') {
-    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
-    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '7 days'";
-    else                          $timeCondition = "AND received_at >= datetime('now', '-7 days', 'localtime')";
+$rangeHours = ['1h' => 1, '6h' => 6, '24h' => 24, '7d' => 24 * 7];
+if (isset($rangeHours[$range])) {
+    $cutoff = (new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta')))
+        ->modify("-{$rangeHours[$range]} hours")
+        ->format('Y-m-d H:i:s');
+    $timeCondition = ' AND received_at >= ?';
+    $params[] = $cutoff;
 }
 
 if ($startDate !== '') {
@@ -194,17 +215,38 @@ $stats = [
     <title>Riwayat & Laporan Telemetri — Classic Enzyme</title>
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
     <style>
-        .filter-form-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
-            width: 100%;
+        .history-filter-panel { padding: 18px 20px; }
+        .history-filter-top, .history-filter-actions, .history-filter-summary {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
         }
+        .history-filter-top { justify-content: space-between; margin-bottom: 14px; }
+        .history-filter-title { font-size: .82rem; font-weight: 700; color: var(--text-main); }
+        .history-filter-subtitle { margin-top: 3px; color: var(--text-muted); font-size: .72rem; }
+        .history-presets { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 2px; }
+        .history-preset { min-height: 36px; padding: 0 12px; border: 1px solid var(--glass-border-2); border-radius: 999px; background: transparent; color: var(--text-muted); font: 600 .74rem var(--font-sans); white-space: nowrap; cursor: pointer; }
+        .history-preset.active { background: var(--teal); border-color: var(--teal); color: #061312; }
+        .history-filter-summary { color: var(--text-muted); font-size: .72rem; margin-top: 12px; }
+        .history-filter-chip { padding: 5px 9px; border-radius: 999px; background: var(--glass-bg); border: 1px solid var(--glass-border-2); }
+        .history-advanced { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--glass-border-2); }
+        .history-advanced[hidden] { display: none; }
+        .history-advanced-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .history-filter-actions { margin-top: 14px; }
+        .history-filter-actions .glass-btn { min-height: 42px; }
         @media (min-width: 640px) {
-            .filter-form-grid {
-                grid-template-columns: repeat(3, 1fr) auto;
-                align-items: flex-end;
-            }
+            .history-advanced-grid { grid-template-columns: repeat(4, 1fr); align-items: end; }
+            .history-filter-actions { justify-content: flex-end; }
+        }
+        @media (max-width: 639px) {
+            .history-filter-panel { padding: 16px 14px; }
+            .history-filter-top { align-items: flex-start; }
+            .history-filter-top .glass-btn { width: 100%; }
+            .history-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .history-preset { width: 100%; padding: 0 6px; }
+            .history-filter-actions { flex-direction: column; }
+            .history-filter-actions .glass-btn { width: 100%; }
+            body[data-page="history"] .sensor-title { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.15; }
+            body[data-page="history"] .sensor-header { gap: 5px; }
+            body[data-page="history"] .sensor-header .sensor-badge { font-size: .5rem; padding: 2px 5px; }
         }
     </style>
 </head>
@@ -235,7 +277,7 @@ $stats = [
                     <a href="index.php" class="glass-btn nav-desktop-only">Dashboard</a>
                     <a href="?<?= htmlspecialchars($filterQuery) ?>&action=export_csv" class="glass-btn nav-desktop-only">Ekspor CSV</a>
                     <?php if (isAdminLoggedIn()): ?>
-                    <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
+                    <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal-text); border-color:var(--teal-border);">Admin</a>
                     <?php else: ?>
                     <a href="login.php" class="glass-btn nav-desktop-only" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
                     <?php endif; ?>
@@ -251,63 +293,72 @@ $stats = [
         </header>
 
         <!-- Filter Bar -->
-        <section class="glass" style="padding: 18px 20px;">
-            <form method="GET" class="filter-form-grid">
+        <section class="glass history-filter-panel">
+            <div class="history-filter-top">
                 <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">PILIH DEVICE</label>
-                    <select name="device_id" class="glass-select" onchange="this.form.submit()">
-                        <?php foreach ($devices as $d): ?>
-                            <option value="<?= htmlspecialchars($d['device_id']) ?>" <?= $d['device_id'] === $deviceId ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($d['device_name']) ?> (<?= htmlspecialchars($d['device_id']) ?>)
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <div class="history-filter-title">Periode telemetri</div>
+                    <div class="history-filter-subtitle"><?= htmlspecialchars($deviceId) ?> · <?= number_format($totalRecords, 0, ',', '.') ?> rekaman ditemukan</div>
+                </div>
+                <button type="button" class="glass-btn" id="advancedFilterToggle" aria-expanded="false" aria-controls="advancedHistoryFilters">
+                    ⚙ Filter lanjutan
+                </button>
+            </div>
+
+            <form method="GET" id="historyFilterForm">
+                <input type="hidden" name="device_id" value="<?= htmlspecialchars($deviceId) ?>">
+                <input type="hidden" name="preset" id="historyPreset" value="<?= htmlspecialchars($preset) ?>">
+                <input type="hidden" name="range" id="historyRange" value="<?= htmlspecialchars($range) ?>">
+                <div class="history-presets" role="group" aria-label="Preset periode">
+                    <?php
+                    $presetLabels = ['today' => 'Hari ini', '7d' => '7 Hari', 'this_month' => 'Bulan ini', 'last_month' => 'Bulan lalu', 'all' => 'Semua', 'custom' => 'Custom'];
+                    foreach ($presetLabels as $presetKey => $presetLabel):
+                    ?>
+                        <button type="button" class="history-preset <?= $preset === $presetKey ? 'active' : '' ?>" data-preset="<?= $presetKey ?>">
+                            <?= $presetLabel ?>
+                        </button>
+                    <?php endforeach; ?>
                 </div>
 
-                <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">RENTANG WAKTU</label>
-                    <select name="range" class="glass-select" onchange="this.form.submit()">
-                        <option value="1h" <?= $range === '1h' ? 'selected' : '' ?>>1 Jam Terakhir</option>
-                        <option value="6h" <?= $range === '6h' ? 'selected' : '' ?>>6 Jam Terakhir</option>
-                        <option value="24h" <?= $range === '24h' ? 'selected' : '' ?>>24 Jam Terakhir</option>
-                        <option value="7d" <?= $range === '7d' ? 'selected' : '' ?>>7 Hari Terakhir</option>
-                        <option value="all" <?= $range === 'all' ? 'selected' : '' ?>>Semua Data</option>
-                    </select>
+                <div class="history-filter-summary">
+                    <span class="history-filter-chip"><?= $presetLabels[$preset] ?></span>
+                    <?php if ($startDate !== '' || $endDate !== ''): ?>
+                        <span class="history-filter-chip"><?= htmlspecialchars($startDate ?: '...') ?> – <?= htmlspecialchars($endDate ?: '...') ?></span>
+                    <?php endif; ?>
+                    <span class="history-filter-chip"><?= $status === 'all' ? 'Semua status' : ucfirst($status) ?></span>
                 </div>
 
-                <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">DARI TANGGAL</label>
-                    <input type="date" name="start_date" value="<?= htmlspecialchars($startDate) ?>" class="glass-input">
-                </div>
-
-                <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">SAMPAI TANGGAL</label>
-                    <input type="date" name="end_date" value="<?= htmlspecialchars($endDate) ?>" class="glass-input">
-                </div>
-
-                <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">STATUS DATA</label>
-                    <select name="status" class="glass-select">
-                        <option value="all" <?= $status === 'all' ? 'selected' : '' ?>>Semua Data</option>
-                        <option value="valid" <?= $status === 'valid' ? 'selected' : '' ?>>Valid</option>
-                        <option value="invalid" <?= $status === 'invalid' ? 'selected' : '' ?>>Invalid</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:4px; font-weight:600;">PER HALAMAN</label>
-                    <select name="limit" class="glass-select" onchange="this.form.submit()">
-                        <option value="50" <?= $limit == 50 ? 'selected' : '' ?>>50 Baris</option>
-                        <option value="100" <?= $limit == 100 ? 'selected' : '' ?>>100 Baris</option>
-                        <option value="200" <?= $limit == 200 ? 'selected' : '' ?>>200 Baris</option>
-                        <option value="500" <?= $limit == 500 ? 'selected' : '' ?>>500 Baris</option>
-                    </select>
-                </div>
-
-                <div style="display: flex; align-items: flex-end;">
-                    <button type="submit" class="glass-btn" style="width:100%; background: var(--teal); color: #000; font-weight: 700;">
-                        Filter
-                    </button>
+                <div class="history-advanced" id="advancedHistoryFilters" <?= $preset === 'custom' || $status !== 'all' ? '' : 'hidden' ?>>
+                    <div class="history-advanced-grid">
+                        <div>
+                            <label class="history-filter-subtitle" for="historyStartDate">DARI TANGGAL</label>
+                            <input type="date" id="historyStartDate" name="start_date" value="<?= htmlspecialchars($startDate) ?>" class="glass-input">
+                        </div>
+                        <div>
+                            <label class="history-filter-subtitle" for="historyEndDate">SAMPAI TANGGAL</label>
+                            <input type="date" id="historyEndDate" name="end_date" value="<?= htmlspecialchars($endDate) ?>" class="glass-input">
+                        </div>
+                        <div>
+                            <label class="history-filter-subtitle" for="historyStatus">STATUS DATA</label>
+                            <select id="historyStatus" name="status" class="glass-select">
+                                <option value="all" <?= $status === 'all' ? 'selected' : '' ?>>Semua status</option>
+                                <option value="valid" <?= $status === 'valid' ? 'selected' : '' ?>>Valid</option>
+                                <option value="invalid" <?= $status === 'invalid' ? 'selected' : '' ?>>Invalid</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="history-filter-subtitle" for="historyLimit">PER HALAMAN</label>
+                            <select id="historyLimit" name="limit" class="glass-select">
+                                <option value="50" <?= $limit == 50 ? 'selected' : '' ?>>50 baris</option>
+                                <option value="100" <?= $limit == 100 ? 'selected' : '' ?>>100 baris</option>
+                                <option value="200" <?= $limit == 200 ? 'selected' : '' ?>>200 baris</option>
+                                <option value="500" <?= $limit == 500 ? 'selected' : '' ?>>500 baris</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="history-filter-actions">
+                        <a class="glass-btn" href="history.php?device_id=<?= urlencode($deviceId) ?>&preset=all&range=all&limit=<?= $limit ?>">Reset</a>
+                        <button type="submit" class="glass-btn" style="background: var(--teal); color: #000; font-weight: 700;">Terapkan filter</button>
+                    </div>
                 </div>
             </form>
         </section>
@@ -317,7 +368,7 @@ $stats = [
             <div class="glass sensor-card card-temp">
                 <span class="sensor-title">Rata-Rata Suhu</span>
                 <div class="sensor-value-area">
-                    <span class="sensor-value" style="color:var(--pink);"><?= $stats['temp_avg'] ?></span>
+                    <span class="sensor-value" style="color:var(--pink-text);"><?= $stats['temp_avg'] ?></span>
                     <span class="sensor-unit">°C</span>
                 </div>
                 <div class="sensor-footer">
@@ -329,7 +380,7 @@ $stats = [
             <div class="glass sensor-card card-ph">
                 <span class="sensor-title">Rata-Rata pH</span>
                 <div class="sensor-value-area">
-                    <span class="sensor-value" style="color:var(--teal);"><?= $stats['ph_avg'] ?></span>
+                    <span class="sensor-value" style="color:var(--teal-text);"><?= $stats['ph_avg'] ?></span>
                     <span class="sensor-unit">pH</span>
                 </div>
                 <div class="sensor-footer">
@@ -347,7 +398,7 @@ $stats = [
                     <span class="sensor-badge <?= $stats['alc_active'] ? 'badge-violet' : 'badge-slate' ?>"><?= $stats['alc_active'] ? 'GAS' : 'OFF' ?></span>
                 </div>
                 <div class="sensor-value-area">
-                    <span class="sensor-value" style="color:var(--violet);"><?= $stats['alc_avg'] ?></span>
+                    <span class="sensor-value" style="color:var(--violet-text);"><?= $stats['alc_avg'] ?></span>
                     <span class="sensor-unit"><?= $stats['alc_active'] ? 'ADC' : '' ?></span>
                 </div>
                 <div class="sensor-footer">
@@ -390,18 +441,7 @@ $stats = [
                     <h2 style="font-size: 1.15rem; font-weight: 700;">Log Riwayat Telemetri</h2>
                     <p style="font-size: 0.78rem; color: var(--text-muted);">Diurutkan dari data yang paling baru diterima di server</p>
                 </div>
-                <!-- Filter Tampilan Tabel: Semua / Valid (Ada Data) / Offline -->
-                <div class="device-status-filter" id="histFilterGroup" role="group" aria-label="Filter tampilan tabel">
-                    <button class="filter-status-btn active" data-histfilter="all">
-                        Semua
-                    </button>
-                    <button class="filter-status-btn" data-histfilter="valid">
-                        <span class="filter-dot online"></span>Valid (Ada Data)
-                    </button>
-                    <button class="filter-status-btn" data-histfilter="offline">
-                        <span class="filter-dot offline"></span>Offline (Tidak Ada Data)
-                    </button>
-                </div>
+                <span class="history-filter-subtitle">Status data diatur dari Filter lanjutan</span>
             </div>
 
             <!-- Mobile Card View List (< 640px) -->
@@ -517,17 +557,17 @@ $stats = [
                                     <td><?= htmlspecialchars($r['received_at']) ?></td>
                                     <td style="color:var(--text-muted); font-size:0.75rem;"><?= formatRelativeTime($r['received_at']) ?></td>
                                     <td>
-                                        <span style="color:var(--pink); font-weight:700;">
+                                        <span style="color:var(--pink-text); font-weight:700;">
                                             <?= $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--' ?>
                                         </span>
                                     </td>
                                     <td>
-                                        <span style="color:var(--teal); font-weight:700;">
+                                        <span style="color:var(--teal-text); font-weight:700;">
                                             <?= $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--' ?>
                                         </span>
                                     </td>
                                     <td>
-                                        <span style="color:var(--amber); font-weight:700;">
+                                        <span style="color:var(--amber-dark); font-weight:700;">
                                             <?= $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--' ?>
                                         </span>
                                     </td>
@@ -577,6 +617,59 @@ $stats = [
             localStorage.setItem('ce_theme', next);
             updateThemeIcon(next);
         });
+
+        // -----------------------------------------------
+        // Preset periode dan filter lanjutan
+        // -----------------------------------------------
+        (() => {
+            const form = document.getElementById('historyFilterForm');
+            const presetInput = document.getElementById('historyPreset');
+            const rangeInput = document.getElementById('historyRange');
+            const advanced = document.getElementById('advancedHistoryFilters');
+            const toggle = document.getElementById('advancedFilterToggle');
+            const startInput = document.getElementById('historyStartDate');
+            const endInput = document.getElementById('historyEndDate');
+            if (!form || !presetInput) return;
+
+            document.querySelectorAll('.history-preset').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const preset = button.dataset.preset || 'custom';
+                    presetInput.value = preset;
+                    if (rangeInput) rangeInput.value = preset === '7d' ? '7d' : 'all';
+                    document.querySelectorAll('.history-preset').forEach((item) => item.classList.toggle('active', item === button));
+                    if (preset === 'custom') {
+                        advanced.hidden = false;
+                        toggle?.setAttribute('aria-expanded', 'true');
+                        startInput?.focus();
+                        return;
+                    }
+                    if (startInput) startInput.value = '';
+                    if (endInput) endInput.value = '';
+                    form.submit();
+                });
+            });
+
+            toggle?.addEventListener('click', () => {
+                advanced.hidden = !advanced.hidden;
+                toggle.setAttribute('aria-expanded', String(!advanced.hidden));
+            });
+
+            form.addEventListener('submit', (event) => {
+                const start = startInput?.value || '';
+                const end = endInput?.value || '';
+                if (presetInput.value === 'custom' && start && end && end < start) {
+                    event.preventDefault();
+                    endInput?.setCustomValidity('Tanggal sampai tidak boleh lebih awal dari tanggal mulai.');
+                    endInput?.reportValidity();
+                    endInput?.setCustomValidity('');
+                    return;
+                }
+                if (presetInput.value !== 'custom') {
+                    if (startInput) startInput.value = '';
+                    if (endInput) endInput.value = '';
+                }
+            });
+        })();
 
         // -----------------------------------------------
         // Filter Tampilan Tabel Riwayat

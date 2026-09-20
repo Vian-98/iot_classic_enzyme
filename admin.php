@@ -178,7 +178,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         }
         .admin-tab-btn.active {
             background: var(--teal);
-            color: #fff;
+            color: var(--accent-on-teal);
             font-weight: 700;
         }
 
@@ -269,7 +269,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
             height: 42px;
             padding: 0 20px;
             background: var(--teal);
-            color: #fff;
+            color: var(--accent-on-teal);
             border: none;
             border-radius: var(--radius-sm);
             font-family: var(--font-sans);
@@ -293,13 +293,13 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
             cursor: pointer;
             transition: background 0.2s ease;
         }
-        .btn-danger:hover { background: var(--pink); color: #fff; }
+        .btn-danger:hover { background: var(--pink); color: var(--accent-on-pink); }
 
         .btn-teal-outline {
             height: 36px;
             padding: 0 14px;
             background: var(--teal-soft);
-            color: var(--teal-dark);
+            color: var(--teal-text);
             border: 1px solid var(--teal-border);
             border-radius: var(--radius-sm);
             font-family: var(--font-sans);
@@ -308,7 +308,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
             cursor: pointer;
             transition: background 0.2s ease;
         }
-        .btn-teal-outline:hover { background: var(--teal); color: #fff; }
+        .btn-teal-outline:hover { background: var(--teal); color: var(--accent-on-teal); }
 
         /* ---- Flash Message ---- */
         .flash-ok {
@@ -324,7 +324,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         .flash-err {
             background: var(--pink-soft);
             border: 1px solid var(--pink-border);
-            color: var(--pink-dark);
+            color: var(--pink-text);
             border-radius: var(--radius-sm);
             padding: 10px 14px;
             font-size: 0.82rem;
@@ -361,14 +361,14 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         }
 
         /* ---- Severity badge ---- */
-        .sev-critical { background: var(--pink-soft); color: var(--pink-dark); border: 1px solid var(--pink-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
+        .sev-critical { background: var(--pink-soft); color: var(--pink-text); border: 1px solid var(--pink-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
         .sev-warning  { background: rgba(251,191,36,0.15); color: #b45309; border: 1px solid rgba(251,191,36,0.3); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
-        .sev-info     { background: var(--teal-soft); color: var(--teal-dark); border: 1px solid var(--teal-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
+        .sev-info     { background: var(--teal-soft); color: var(--teal-text); border: 1px solid var(--teal-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
 
         .device-status-online {
             display: inline-block;
             background: var(--teal-soft);
-            color: var(--teal);
+            color: var(--teal-text);
             border: 1px solid var(--teal-border);
             border-radius: 9999px;
             padding: 2px 10px;
@@ -379,7 +379,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         .device-status-offline {
             display: inline-block;
             background: var(--pink-soft);
-            color: var(--pink);
+            color: var(--pink-text);
             border: 1px solid var(--pink-border);
             border-radius: 9999px;
             padding: 2px 10px;
@@ -416,9 +416,9 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <a href="history.php" class="glass-btn nav-desktop-only">Riwayat</a>
                     <span class="status-pill nav-desktop-only" style="width:auto; min-width:0; padding: 0 14px; gap:8px;">
                         <span style="font-size:0.75rem; color:var(--text-muted);">Admin:</span>
-                        <span style="font-size:0.8rem; font-weight:700; color:var(--teal);"><?= $adminName ?></span>
+                        <span style="font-size:0.8rem; font-weight:700; color:var(--teal-text);"><?= $adminName ?></span>
                     </span>
-                    <a href="logout.php" class="glass-btn nav-desktop-only" style="color:var(--pink); border-color:var(--pink-border);">Logout</a>
+                    <a href="logout.php" class="glass-btn nav-desktop-only" style="color:var(--pink-text); border-color:var(--pink-border);">Logout</a>
                     <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
                         <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
                     </button>
@@ -428,9 +428,9 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
             <div class="navbar-row-2">
                 <span class="status-pill" style="width:auto; min-width:0; padding: 0 14px; gap:8px; flex:1;">
                     <span style="font-size:0.75rem; color:var(--text-muted);">Admin:</span>
-                    <span style="font-size:0.8rem; font-weight:700; color:var(--teal);"><?= $adminName ?></span>
+                    <span style="font-size:0.8rem; font-weight:700; color:var(--teal-text);"><?= $adminName ?></span>
                 </span>
-                <a href="logout.php" class="glass-btn" style="color:var(--pink); border-color:var(--pink-border);">Logout</a>
+                <a href="logout.php" class="glass-btn" style="color:var(--pink-text); border-color:var(--pink-border);">Logout</a>
             </div>
         </header>
 
@@ -447,7 +447,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                 <button class="admin-tab-btn" data-tab="tab-alarms">
                     Alarm Aktif
                     <?php if (count($alarmsActive)): ?>
-                    <span style="margin-left:4px; background:var(--pink); color:#fff; border-radius:9999px; padding:1px 7px; font-size:0.65rem;"><?= count($alarmsActive) ?></span>
+                    <span style="margin-left:4px; background:var(--pink); color:var(--accent-on-pink); border-radius:9999px; padding:1px 7px; font-size:0.65rem;"><?= count($alarmsActive) ?></span>
                     <?php endif; ?>
                 </button>
                 <button class="admin-tab-btn" data-tab="tab-devices">Devices</button>
@@ -475,7 +475,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <!-- Suhu -->
                     <div style="border-left: 3px solid var(--pink); padding-left: 14px; margin-bottom: 20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--pink); text-transform:uppercase; letter-spacing:0.04em;">Suhu Fermentasi (MAX6675)</div>
+                            <div style="font-size:0.82rem; font-weight:700; color:var(--pink-text); text-transform:uppercase; letter-spacing:0.04em;">Suhu Fermentasi (MAX6675)</div>
                             <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= ($thresholds['temp']['val_min'] ?? '20') . ' – ' . ($thresholds['temp']['val_max'] ?? '40') ?> °C</strong></span>
                         </div>
                         <div class="form-row">
@@ -499,7 +499,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <!-- pH -->
                     <div style="border-left: 3px solid var(--teal); padding-left: 14px; margin-bottom: 20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--teal); text-transform:uppercase; letter-spacing:0.04em;">Keasaman pH (PH-110)</div>
+                            <div style="font-size:0.82rem; font-weight:700; color:var(--teal-text); text-transform:uppercase; letter-spacing:0.04em;">Keasaman pH (PH-110)</div>
                             <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= ($thresholds['ph']['val_min'] ?? '3.0') . ' – ' . ($thresholds['ph']['val_max'] ?? '4.5') ?> pH</strong></span>
                         </div>
                         <div class="form-row">
@@ -523,7 +523,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <!-- Alkohol -->
                     <div style="border-left: 3px solid var(--violet); padding-left: 14px; margin-bottom: 24px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--violet); text-transform:uppercase; letter-spacing:0.04em;">Uap Gas Alkohol (MQ-3 ADC)</div>
+                            <div style="font-size:0.82rem; font-weight:700; color:var(--violet-text); text-transform:uppercase; letter-spacing:0.04em;">Uap Gas Alkohol (MQ-3 ADC)</div>
                             <?php
                                 $hasAlcMin = isset($thresholds['alcohol']['val_min']) && $thresholds['alcohol']['val_min'] !== null && $thresholds['alcohol']['val_min'] !== '';
                                 $hasAlcMax = isset($thresholds['alcohol']['val_max']) && $thresholds['alcohol']['val_max'] !== null && $thresholds['alcohol']['val_max'] !== '';
@@ -602,7 +602,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                 <td style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);"><?= htmlspecialchars($alarm['triggered_at']) ?></td>
                                 <td style="font-weight:600; font-size:0.78rem;"><?= htmlspecialchars($alarm['alarm_type']) ?></td>
                                 <td><span class="sev-<?= htmlspecialchars($alarm['severity']) ?>"><?= htmlspecialchars($alarm['severity']) ?></span></td>
-                                <td style="font-family:var(--font-mono); font-size:0.78rem; color:var(--pink);">
+                                <td style="font-family:var(--font-mono); font-size:0.78rem; color:var(--pink-text);">
                                     <?= $alarm['actual_val'] !== null ? htmlspecialchars($alarm['actual_val']) : '--' ?>
                                 </td>
                                 <td style="font-size:0.75rem; max-width:220px;"><?= htmlspecialchars($alarm['message']) ?></td>
@@ -643,7 +643,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                     <td style="font-size:0.75rem;"><?= htmlspecialchars($alarm['alarm_type']) ?></td>
                                     <td><span class="sev-<?= htmlspecialchars($alarm['severity']) ?>"><?= htmlspecialchars($alarm['severity']) ?></span></td>
                                     <td style="font-size:0.73rem;"><?= $alarm['actual_val'] ?? '--' ?></td>
-                                    <td style="font-size:0.73rem; color:var(--teal); font-family:var(--font-mono);"><?= htmlspecialchars($alarm['ack_at'] ?? '--') ?></td>
+                                    <td style="font-size:0.73rem; color:var(--teal-text); font-family:var(--font-mono);"><?= htmlspecialchars($alarm['ack_at'] ?? '--') ?></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -678,10 +678,10 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                         <tbody>
                             <?php foreach ($devices as $dev): ?>
                             <tr>
-                                <td style="font-family:var(--font-mono); font-size:0.78rem; color:var(--teal);"><?= htmlspecialchars($dev['device_id']) ?></td>
+                                <td style="font-family:var(--font-mono); font-size:0.78rem; color:var(--teal-text);"><?= htmlspecialchars($dev['device_id']) ?></td>
                                 <td style="font-weight:600; font-size:0.82rem;"><?= htmlspecialchars($dev['device_name']) ?></td>
                                 <td style="font-size:0.78rem; color:var(--text-muted);"><?= htmlspecialchars($dev['location']) ?></td>
-                                <td style="font-family:var(--font-mono); font-size:0.76rem; color:var(--pink); font-weight:600;">
+                                <td style="font-family:var(--font-mono); font-size:0.76rem; color:var(--pink-text); font-weight:600;">
                                     <?= htmlspecialchars($dev['last_ip'] ?? 'Belum ada') ?>
                                 </td>
                                 <td>
@@ -751,7 +751,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                 <?php foreach ($admins as $a): ?>
                                 <tr>
                                     <td>#<?= $a['id'] ?></td>
-                                    <td style="font-weight:600; color:var(--teal);"><?= htmlspecialchars($a['username']) ?></td>
+                                    <td style="font-weight:600; color:var(--teal-text);"><?= htmlspecialchars($a['username']) ?></td>
                                     <td style="font-size:0.75rem; color:var(--text-muted);"><?= htmlspecialchars($a['created_at']) ?></td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -764,7 +764,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
 
         <footer class="footer-bar glass">
             <div><strong>Classic Enzyme IoT</strong> · Admin Panel</div>
-            <div style="font-size:0.73rem; color:var(--text-muted);">Login sebagai <strong style="color:var(--teal);"><?= $adminName ?></strong></div>
+            <div style="font-size:0.73rem; color:var(--text-muted);">Login sebagai <strong style="color:var(--teal-text);"><?= $adminName ?></strong></div>
         </footer>
 
     </div><!-- /.app-wrapper -->

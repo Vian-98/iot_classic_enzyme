@@ -99,6 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDark = state.theme === 'dark';
         const gridColor = isDark ? 'rgba(78, 191, 193, 0.08)' : 'rgba(78, 191, 193, 0.12)';
         const textColor = isDark ? '#7fa8b0' : '#5a7080';
+        const tempTextColor = isDark ? '#f17ab8' : '#a92d6d';
+        const phTextColor = isDark ? '#7bdcdd' : '#167679';
+        const alcoholTextColor = isDark ? '#fbbf24' : '#b45309';
 
         const ctx = el.chartCanvas.getContext('2d');
 
@@ -230,6 +233,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDark = state.theme === 'dark';
         const gridColor = isDark ? 'rgba(78, 191, 193, 0.08)' : 'rgba(78, 191, 193, 0.12)';
         const textColor = isDark ? '#7fa8b0' : '#5a7080';
+        const tempTextColor = isDark ? '#f17ab8' : '#a92d6d';
+        const phTextColor = isDark ? '#7bdcdd' : '#167679';
+        const alcoholTextColor = isDark ? '#fbbf24' : '#b45309';
         const chart = state.chartInstance;
 
         chart.options.scales.x.grid.color = gridColor;
@@ -237,11 +243,14 @@ document.addEventListener('DOMContentLoaded', () => {
         chart.options.scales.yTemp.grid.color = gridColor;
         chart.options.scales.yTemp.ticks.color = textColor;
         chart.options.scales.yPh.ticks.color = textColor;
-        chart.options.scales.yAlcohol.ticks.color = '#f59e0b';
+        chart.options.scales.yAlcohol.ticks.color = alcoholTextColor;
         chart.options.plugins.legend.labels.color = textColor;
         chart.options.plugins.tooltip.backgroundColor = isDark ? 'rgba(15,22,35,0.90)' : 'rgba(255,255,255,0.96)';
         chart.options.plugins.tooltip.titleColor = isDark ? '#f0f8f8' : '#1a2332';
         chart.options.plugins.tooltip.bodyColor = isDark ? '#7fa8b0' : '#5a7080';
+        chart.options.scales.yTemp.title.color = tempTextColor;
+        chart.options.scales.yPh.title.color = phTextColor;
+        chart.options.scales.yAlcohol.title.color = alcoholTextColor;
         chart.update('none');
     }
 
@@ -464,10 +473,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         const chip = document.getElementById('statusChip');
                         if (chip) {
                             if (rssiVal === null) { chip.textContent = '—'; chip.style.background = ''; }
-                            else if (rssiVal >= -60) { chip.textContent = 'Sangat Baik'; chip.style.background = 'var(--teal)'; chip.style.color = '#000'; }
-                            else if (rssiVal >= -70) { chip.textContent = 'Baik'; chip.style.background = 'var(--teal)'; chip.style.color = '#000'; }
+                            else if (rssiVal >= -60) { chip.textContent = 'Sangat Baik'; chip.style.background = 'var(--teal)'; chip.style.color = 'var(--accent-on-teal)'; }
+                            else if (rssiVal >= -70) { chip.textContent = 'Baik'; chip.style.background = 'var(--teal)'; chip.style.color = 'var(--accent-on-teal)'; }
                             else if (rssiVal >= -80) { chip.textContent = 'Lemah'; chip.style.background = 'var(--amber)'; chip.style.color = '#000'; }
-                            else { chip.textContent = 'Kritis'; chip.style.background = 'var(--danger)'; chip.style.color = '#fff'; }
+                            else { chip.textContent = 'Kritis'; chip.style.background = 'var(--danger)'; chip.style.color = 'var(--accent-on-danger)'; }
                         }
                     }
                     if (el.valFirmware) {
@@ -619,10 +628,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr class="data-row" ${isHidden}>
                     <td>
                         <strong>${escapeHtml(row.time)}</strong>
-                        <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
+                        <span style="font-size:0.68rem; color:var(--teal-text); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
                     </td>
-                    <td><span style="color:var(--pink); font-weight:700;">${isValid && row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
-                    <td><span style="color:var(--teal); font-weight:700;">${isValid && row.ph !== null ? row.ph : '--'}</span></td>
+                    <td><span style="color:var(--pink-text); font-weight:700;">${isValid && row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
+                    <td><span style="color:var(--teal-text); font-weight:700;">${isValid && row.ph !== null ? row.ph : '--'}</span></td>
                     <td><span style="color:var(--amber); font-weight:700;">${isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span></td>
                     <td>${isValid && row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
                     <td><span class="sensor-badge ${isValid ? 'badge-teal' : 'badge-pink'}" style="font-size:0.65rem;">${isValid ? 'VALID' : 'INVALID'}</span></td>
@@ -634,7 +643,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tableFilter === 'offline' && countOffline === 0) {
             tableHtml += `
                 <tr class="empty-filter-row">
-                    <td colspan="6" style="text-align:center; color:var(--teal); padding:18px; font-size:0.8rem;">
+                    <td colspan="6" style="text-align:center; color:var(--teal-text); padding:18px; font-size:0.8rem;">
                         <span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>
                         Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime
                     </td>
@@ -805,7 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (filterVal === 'offline' && offlineRows.length === 0) {
             el.historyTableBody.insertAdjacentHTML('beforeend', `
                 <tr class="empty-filter-row">
-                    <td colspan="6" style="text-align:center; color:var(--teal); padding:18px; font-size:0.8rem;">
+                    <td colspan="6" style="text-align:center; color:var(--teal-text); padding:18px; font-size:0.8rem;">
                         <span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>
                         Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime
                     </td>

@@ -39,8 +39,8 @@
 
 const char* FIRMWARE_VERSION = "2.0.0";
 
-// Interval Pengiriman Data (dalam milidetik: 5000 ms = 5 detik)
-const unsigned long SEND_INTERVAL_MS = 5000;
+// Interval Pengiriman Data (dalam milidetik: 5000 ms = 5 detik atau 5UL * 60UL * 1000UL = 5 menit)
+const unsigned long SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
 
 // ==============================================================================
 // 2. STATUS HARDWARE SENSOR (HANYA SENSOR TERPASANG YANG DIKIRIM)

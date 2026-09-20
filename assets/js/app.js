@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lastSeenTimestamp: null,
         lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
         pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
-        realtimeStaleAfterSeconds: 15, // Data lebih lama dianggap stale di dashboard
+        realtimeStaleAfterSeconds: 300, // 5 menit – sesuai interval kirim sensor
         offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
         deviceMap: {},              // { device_id: { is_online, device_name } }
         tableFilter: 'all',         // 'all' | 'valid' | 'offline'
@@ -373,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const th = json.thresholds || {};
 
                 // `offline_timeout` adalah status konektivitas umum (default 5 menit),
-                // sedangkan dashboard memakai jendela realtime ketat 15 detik.
+                // sedangkan dashboard memakai jendela realtime 5 menit (sesuai interval sensor).
                 const secondsSinceTelemetry = Number(dev.seconds_ago);
                 const isRealtime = Boolean(tel && dev.is_online && tel.is_valid !== false &&
                     Number.isFinite(secondsSinceTelemetry) &&

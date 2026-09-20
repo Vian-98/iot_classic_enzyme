@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
         tableFilter: 'all',         // 'all' | 'valid' | 'offline'
         chartInstance: null,
         pollTimer: null,
+        historyPollTimer: null,
+        metadataPollTimer: null,
         secondsTickerTimer: null,
     };
 
@@ -226,6 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+        document.getElementById('chartLoadingSkeleton')?.classList.add('is-hidden');
     }
 
     function updateChartTheme() {
@@ -340,6 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 5. FETCH DATA REALTIME DARI API (POLLING)
     // --------------------------------------------------------------------------
     async function fetchLatestData() {
+        if (document.visibilityState !== 'visible') return;
         try {
             const res = await fetch(`api/latest.php?device_id=${encodeURIComponent(state.currentDeviceId)}`);
             const json = await res.json();
@@ -393,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (tel && isRealtime) {
+                    document.querySelectorAll('.sensor-card.loading-skeleton').forEach(card => card.classList.remove('loading-skeleton'));
                     // Deteksi jika ada rekaman baru masuk: langsung refresh grafik & tabel tanpa delay!
                     const isNewRecord = (state.lastTelemetryId !== null && tel.id !== state.lastTelemetryId);
                     state.lastTelemetryId = tel.id;
@@ -501,6 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 6. FETCH HISTORI DATA (UNTUK GRAFIK & TABEL LOG)
     // --------------------------------------------------------------------------
     async function fetchHistoryData() {
+        if (document.visibilityState !== 'visible') return;
         try {
             const res = await fetch(`api/history.php?device_id=${encodeURIComponent(state.currentDeviceId)}&range=${state.chartRange}&limit=40`);
             const json = await res.json().catch(() => ({}));
@@ -512,6 +518,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (Array.isArray(json.data)) {
                 updateChartData(json.data);
                 updateHistoryTable(json.data);
+                document.querySelector('.loading-placeholder')?.classList.remove('loading-placeholder');
             }
         } catch (err) {
             console.warn('Gagal memuat histori grafik:', err);
@@ -676,8 +683,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const gapHrs  = Math.floor(gapSeconds / 3600);
                     const gapMins = Math.floor((gapSeconds % 3600) / 60);
                     const gapLabel = gapHrs > 0 ? `${gapHrs} jam ${gapMins} menit` : `${gapMins} menit`;
+                    const isHidden = state.tableFilter === 'valid' ? ' style="display:none;"' : '';
                     cardHtml += `
-                        <div class="table-card-downtime">
+                        <div class="table-card-downtime downtime-row"${isHidden}>
                             <span class="downtime-dot" style="width:8px;height:8px;border-radius:50%;background:var(--pink);flex-shrink:0;"></span>
                             <span><strong>OFFLINE</strong> selama <strong>${gapLabel}</strong></span>
                         </div>`;
@@ -691,9 +699,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const alc   = isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--';
             const rssi  = isValid && row.rssi !== null ? row.rssi + ' dBm' : '--';
             const relT  = escapeHtml(row.relative_time || 'Baru saja');
+            const isHidden = state.tableFilter === 'offline' || (state.tableFilter === 'valid' && !isValid)
+                ? ' style="display:none;"'
+                : '';
 
             cardHtml += `
-                <div class="table-card-item data-row">
+                <div class="table-card-item data-row"${isHidden}>
                     <div class="table-card-header">
                         <span class="table-card-time">${escapeHtml(row.time)}</span>
                         <span class="table-card-rel">${relT}</span>
@@ -904,10 +915,10 @@ document.addEventListener('DOMContentLoaded', () => {
     state.pollTimer = setInterval(fetchLatestData, state.pollIntervalMs);
 
     // Refresh grafik & tabel otomatis tiap 6 detik (fallback jika tidak ada push baru)
-    setInterval(fetchHistoryData, 6000);
+    state.historyPollTimer = setInterval(fetchHistoryData, 6000);
 
     // Refresh metadata device setiap 30 detik (sync timeout offline)
-    setInterval(fetchDeviceMetadata, 30000);
+    state.metadataPollTimer = setInterval(fetchDeviceMetadata, 30000);
 
     // Ticker hitungan detik update tiap 1 detik
     state.secondsTickerTimer = setInterval(updateRelativeTimeCounter, 1000);

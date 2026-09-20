@@ -906,6 +906,44 @@ body {
   width: 100%;
 }
 
+.chart-loading-skeleton {
+  position: absolute;
+  inset: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  pointer-events: none;
+}
+
+.chart-loading-skeleton.is-hidden {
+  display: none;
+}
+
+.skeleton-line {
+  display: block;
+  width: 68%;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--glass-border-2), var(--glass-bg-strong), var(--glass-border-2));
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line-wide { width: 92%; }
+.skeleton-line-short { width: 42%; }
+
+.loading-placeholder {
+  min-height: 126px;
+  justify-content: center;
+  gap: 14px;
+}
+
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* ------------------------------------------------------------------------------
    9. DATA TABLE (Mobile: horizontally scrollable)
    ------------------------------------------------------------------------------ */
@@ -1346,4 +1384,5 @@ body {
   .glass-toast { animation: none !important; }
   .status-indicator-dot::after { animation: none !important; }
   .val-updated { animation: none !important; }
+  .skeleton-line { animation: none !important; }
 }

@@ -8,7 +8,6 @@
     <div class="chart-header">
         <div class="chart-title-group">
             <h2>Suhu, pH &amp; Alkohol — Telemetri Realtime</h2>
-            <p>Diperbarui otomatis · Klik label legenda di atas untuk menyembunyikan/menampilkan garis parameter</p>
         </div>
         <div class="chart-controls">
             <button class="chart-tab-btn active" data-range="1h">1 Jam</button>
@@ -19,6 +18,11 @@
         </div>
     </div>
     <div class="chart-container-box">
+        <div class="chart-loading-skeleton" id="chartLoadingSkeleton" aria-label="Memuat grafik" role="status">
+            <span class="skeleton-line skeleton-line-wide"></span>
+            <span class="skeleton-line"></span>
+            <span class="skeleton-line skeleton-line-short"></span>
+        </div>
         <canvas id="telemetryChart"></canvas>
     </div>
 </section>

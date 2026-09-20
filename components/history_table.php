@@ -31,8 +31,10 @@
 
     <!-- Mobile Card View List (< 640px) -->
     <div id="historyCardList" class="table-card-list">
-        <div class="table-card-item" style="text-align:center; color:var(--text-muted); padding:24px;">
-            Memuat data telemetri...
+        <div class="table-card-item loading-placeholder" aria-label="Memuat data telemetri" role="status">
+            <span class="skeleton-line skeleton-line-wide"></span>
+            <span class="skeleton-line"></span>
+            <span class="skeleton-line skeleton-line-short"></span>
         </div>
     </div>
 

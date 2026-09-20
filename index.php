@@ -23,7 +23,7 @@ try {
     <title>Classic Enzyme IoT — Fermentation Monitor</title>
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
     <!-- Chart.js via CDN (Zero-build) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body data-page="dashboard">
     <div class="ambient-mesh">
@@ -52,6 +52,6 @@ try {
 
     <div id="toastContainer" class="toast-container"></div>
     <?php include __DIR__ . '/components/bottom_nav.php'; ?>
-    <script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>"></script>
+    <script defer src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>"></script>
 </body>
 </html>

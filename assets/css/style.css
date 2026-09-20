@@ -111,7 +111,7 @@
 }
 
 html {
-  font-size: 15px;
+  font-size: 16px;
   scroll-behavior: smooth;
 }
 
@@ -125,7 +125,7 @@ body {
   overflow-x: hidden;
   line-height: 1.55;
   transition: background-color 0.4s ease, color 0.35s ease;
-  padding-bottom: env(safe-area-inset-bottom, 20px);
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 20px));
 }
 
 /* ------------------------------------------------------------------------------
@@ -265,7 +265,7 @@ body {
 }
 
 /* ------------------------------------------------------------------------------
-   6. NAVBAR DOCK (Mobile: stacked column → Tablet+: pill row)
+   6. NAVBAR DOCK (Mobile: 2 structured rows → Tablet+: single row)
    ------------------------------------------------------------------------------ */
 .navbar-dock {
   display: flex;
@@ -273,6 +273,31 @@ body {
   padding: 14px 16px;
   gap: 12px;
   border-radius: var(--radius-lg);
+}
+
+.navbar-row-1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.navbar-row-1-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-desktop-only {
+  display: none !important;
+}
+
+.navbar-row-2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
 }
 
 .brand-section {
@@ -546,6 +571,66 @@ body {
 }
 
 /* ------------------------------------------------------------------------------
+   6b. BOTTOM NAVIGATION DOCK (Mobile-first, Fixed, Glassmorphism)
+   ------------------------------------------------------------------------------ */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  height: calc(64px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 12px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  border-top: 1px solid var(--glass-border);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 64px;
+  min-height: var(--touch-target);
+  padding: 4px 14px;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  font-size: 0.72rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.bottom-nav-item svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bottom-nav-item.active {
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.bottom-nav-item.active svg {
+  transform: scale(1.12);
+  stroke: var(--teal);
+}
+
+.bottom-nav-item:active {
+  transform: scale(0.92);
+}
+
+/* ------------------------------------------------------------------------------
    7. SENSOR METRIC CARDS (Mobile: 1 col stack)
    ------------------------------------------------------------------------------ */
 .metric-grid {
@@ -555,11 +640,11 @@ body {
 }
 
 .sensor-card {
-  padding: 18px 20px 16px;
+  padding: 16px 18px 14px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 170px;
+  min-height: 150px;
   border-top: 3px solid var(--teal); /* Default top accent */
 }
 
@@ -797,11 +882,122 @@ body {
   font-size: 0.78rem;
 }
 
+/* Dual-view: Card List di mobile, Table di Desktop */
+.table-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.table-card-item {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 13px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.table-card-item:active {
+  transform: scale(0.98);
+}
+
+.table-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--glass-border-2);
+  font-size: 0.76rem;
+}
+
+.table-card-time {
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+
+.table-card-rel {
+  font-size: 0.68rem;
+  color: var(--teal);
+  background: var(--teal-soft);
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+.table-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  text-align: center;
+}
+
+.table-card-metric {
+  background: rgba(8, 14, 24, 0.25);
+  border: 1px solid var(--glass-border-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+[data-theme="light"] .table-card-metric {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.table-card-metric-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.table-card-metric-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+.table-card-metric-value.temp { color: var(--pink); }
+.table-card-metric-value.ph { color: var(--teal); }
+.table-card-metric-value.alc { color: var(--amber); }
+
+.table-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+  padding-top: 4px;
+}
+
+.table-card-downtime {
+  background: rgba(222, 83, 157, 0.10);
+  border: 1px dashed var(--pink-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--pink);
+}
+
 .table-responsive {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: var(--radius-md);
+}
+
+.table-card-list ~ .table-responsive {
+  display: none;
 }
 
 .glass-table {
@@ -892,7 +1088,7 @@ body {
 
 .toast-container {
   position: fixed;
-  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  top: calc(86px + env(safe-area-inset-top, 0px));
   left: 14px;
   right: 14px;
   z-index: 1000;
@@ -916,7 +1112,7 @@ body {
 }
 
 @keyframes toastIn {
-  from { transform: translateY(28px) scale(0.94); opacity: 0; }
+  from { transform: translateY(-18px) scale(0.94); opacity: 0; }
   to   { transform: translateY(0) scale(1); opacity: 1; }
 }
 
@@ -925,6 +1121,14 @@ body {
    ------------------------------------------------------------------------------ */
 @media (min-width: 640px) {
   html { font-size: 16px; }
+
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 20px);
+  }
+
+  .bottom-nav {
+    display: none !important;
+  }
 
   .app-wrapper {
     padding: 18px 20px 48px;
@@ -937,10 +1141,33 @@ body {
     justify-content: space-between;
     border-radius: 9999px;
     padding: 12px 20px;
+    gap: 16px;
+  }
+
+  .navbar-row-1 {
+    width: auto;
+    gap: 16px;
+  }
+
+  .nav-desktop-only {
+    display: inline-flex !important;
+  }
+
+  .navbar-row-2 {
+    width: auto;
+    flex-wrap: nowrap;
   }
 
   .dock-controls { width: auto; flex-wrap: nowrap; }
   .status-pill   { width: auto; order: unset; }
+
+  .table-card-list {
+    display: none !important;
+  }
+
+  .table-responsive {
+    display: block !important;
+  }
 
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -976,7 +1203,7 @@ body {
   .toast-container {
     left: auto;
     right: 20px;
-    bottom: 20px;
+    top: 96px;
     max-width: 360px;
   }
 

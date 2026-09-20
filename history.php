@@ -31,7 +31,8 @@ if ($action === 'export_csv') {
     if (isAdminLoggedIn()) {
         $headers[] = 'IP Pengirim';
     }
-    fputcsv($output, $headers);
+    // Escape eksplisit agar kompatibel dengan PHP 8.4+ dan output CSV bersih.
+    fputcsv($output, $headers, ',', '"', '');
 
     $stmtExport = $db->prepare("SELECT * FROM telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 5000");
     $stmtExport->execute([$deviceId]);
@@ -51,7 +52,7 @@ if ($action === 'export_csv') {
         if (isAdminLoggedIn()) {
             $csvRow[] = $row['ip_address'];
         }
-        fputcsv($output, $csvRow);
+        fputcsv($output, $csvRow, ',', '"', '');
     }
     fclose($output);
     exit;
@@ -64,17 +65,25 @@ try {
     $devices = [];
 }
 
-// Query Data with date filter (detect active driver: MySQL vs SQLite fallback)
-$isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+// Query Data with date filter (detect active driver: PostgreSQL / MySQL / SQLite)
+$driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
 $timeCondition = '';
 if ($range === '1h') {
-    $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)" : "AND received_at >= datetime('now', '-1 hour', 'localtime')";
+    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)";
+    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '1 hour'";
+    else                          $timeCondition = "AND received_at >= datetime('now', '-1 hour', 'localtime')";
 } elseif ($range === '6h') {
-    $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)" : "AND received_at >= datetime('now', '-6 hours', 'localtime')";
+    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)";
+    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '6 hours'";
+    else                          $timeCondition = "AND received_at >= datetime('now', '-6 hours', 'localtime')";
 } elseif ($range === '24h') {
-    $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)" : "AND received_at >= datetime('now', '-24 hours', 'localtime')";
+    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)";
+    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '24 hours'";
+    else                          $timeCondition = "AND received_at >= datetime('now', '-24 hours', 'localtime')";
 } elseif ($range === '7d') {
-    $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)" : "AND received_at >= datetime('now', '-7 days', 'localtime')";
+    if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+    elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '7 days'";
+    else                          $timeCondition = "AND received_at >= datetime('now', '-7 days', 'localtime')";
 }
 
 $stmt = $db->prepare("
@@ -88,10 +97,11 @@ $stmt->bindValue(2, $limit, PDO::PARAM_INT);
 $stmt->execute();
 $records = $stmt->fetchAll();
 
-// Calculate simple statistics
-$temps    = array_filter(array_column($records, 'temperature'), fn($v) => $v !== null);
-$phs      = array_filter(array_column($records, 'ph'), fn($v) => $v !== null);
-$alcohols = array_filter(array_column($records, 'alcohol'), fn($v) => $v !== null);
+// Statistik hanya menggunakan pembacaan yang lolos validasi transport.
+$validRecords = array_filter($records, fn($r) => !array_key_exists('is_valid', $r) || (bool)$r['is_valid']);
+$temps    = array_filter(array_column($validRecords, 'temperature'), fn($v) => $v !== null);
+$phs      = array_filter(array_column($validRecords, 'ph'), fn($v) => $v !== null);
+$alcohols = array_filter(array_column($validRecords, 'alcohol'), fn($v) => $v !== null);
 
 $stats = [
     'count'       => count($records),
@@ -129,7 +139,7 @@ $stats = [
         }
     </style>
 </head>
-<body>
+<body data-page="history">
 
     <!-- Ambient Animated Background -->
     <div class="ambient-mesh">
@@ -142,26 +152,32 @@ $stats = [
 
         <!-- Navbar Dock -->
         <header class="navbar-dock glass">
-            <div class="brand-section">
-                <a href="index.php" style="text-decoration:none; display:flex; align-items:center;">
-                    <div>
-                        <h1 class="brand-title">Classic Enzyme</h1>
-                        <div class="brand-subtitle">Riwayat Telemetri</div>
-                    </div>
-                </a>
+            <!-- Row 1: Brand & Action Buttons (Mobile) / Left & Right (Desktop) -->
+            <div class="navbar-row-1">
+                <div class="brand-section">
+                    <a href="index.php" style="text-decoration:none; display:flex; align-items:center;">
+                        <div>
+                            <h1 class="brand-title">Classic Enzyme</h1>
+                            <div class="brand-subtitle">Riwayat Telemetri</div>
+                        </div>
+                    </a>
+                </div>
+                <div class="navbar-row-1-actions">
+                    <a href="index.php" class="glass-btn nav-desktop-only">Dashboard</a>
+                    <a href="?device_id=<?= urlencode($deviceId) ?>&range=<?= urlencode($range) ?>&action=export_csv" class="glass-btn nav-desktop-only">Ekspor CSV</a>
+                    <?php if (isAdminLoggedIn()): ?>
+                    <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
+                    <?php else: ?>
+                    <a href="login.php" class="glass-btn nav-desktop-only" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
+                    <?php endif; ?>
+                    <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
+                        <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
+                    </button>
+                </div>
             </div>
-
-            <div class="dock-controls">
-                <a href="index.php" class="glass-btn">Dashboard</a>
-                <a href="?device_id=<?= urlencode($deviceId) ?>&range=<?= urlencode($range) ?>&action=export_csv" class="glass-btn">Ekspor CSV</a>
-                <?php if (isAdminLoggedIn()): ?>
-                <a href="admin.php" class="glass-btn" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
-                <?php else: ?>
-                <a href="login.php" class="glass-btn" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
-                <?php endif; ?>
-                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
-                    <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
-                </button>
+            <!-- Row 2: Ekspor CSV (mobile visible) -->
+            <div class="navbar-row-2">
+                <a href="?device_id=<?= urlencode($deviceId) ?>&range=<?= urlencode($range) ?>&action=export_csv" class="glass-btn" style="font-size:0.8rem;">⬇ Ekspor CSV</a>
             </div>
         </header>
 
@@ -290,6 +306,65 @@ $stats = [
                 </div>
             </div>
 
+            <!-- Mobile Card View List (< 640px) -->
+            <div class="table-card-list" id="historyCardList">
+                <?php if (empty($records)): ?>
+                    <div class="table-card-item" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                        Tidak ada data untuk filter waktu yang dipilih.
+                    </div>
+                <?php else: ?>
+                    <?php
+                        $prevTimestampCard = null;
+                        $offlineTimeoutCard = (int)getSetting('offline_timeout_seconds', 300);
+                        foreach ($records as $r):
+                            $currentTimestamp = strtotime($r['received_at']);
+                            if ($prevTimestampCard !== null) {
+                                $gapSeconds = $prevTimestampCard - $currentTimestamp;
+                                if ($gapSeconds > $offlineTimeoutCard) {
+                                    $gapHrs = floor($gapSeconds / 3600);
+                                    $gapMins = floor(($gapSeconds % 3600) / 60);
+                                    $gapLabel = $gapHrs > 0 ? "{$gapHrs} jam {$gapMins} menit" : "{$gapMins} menit";
+                                    echo "<div class='table-card-downtime downtime-row'>
+                                        <span class='downtime-dot' style='width:8px;height:8px;border-radius:50%;background:var(--pink);flex-shrink:0;'></span>
+                                        <span><strong>OFFLINE</strong> selama <strong>{$gapLabel}</strong> (antara " . date('H:i:s', $currentTimestamp) . " s/d " . date('H:i:s', $prevTimestampCard) . ")</span>
+                                    </div>";
+                                }
+                            }
+                            $prevTimestampCard = $currentTimestamp;
+                            $isValidRecord = !array_key_exists('is_valid', $r) || (bool)$r['is_valid'];
+                            $temp = $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--';
+                            $ph   = $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--';
+                            $alc  = $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--';
+                            $rssi = $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : '--';
+                    ?>
+                        <div class="table-card-item data-row">
+                            <div class="table-card-header">
+                                <span class="table-card-time"><?= htmlspecialchars($r['received_at']) ?></span>
+                                <span class="table-card-rel"><?= $isValidRecord ? formatRelativeTime($r['received_at']) : 'DATA INVALID' ?></span>
+                            </div>
+                            <div class="table-card-grid">
+                                <div class="table-card-metric">
+                                    <span class="table-card-metric-label">Suhu</span>
+                                    <span class="table-card-metric-value temp"><?= $temp ?></span>
+                                </div>
+                                <div class="table-card-metric">
+                                    <span class="table-card-metric-label">pH</span>
+                                    <span class="table-card-metric-value ph"><?= $ph ?></span>
+                                </div>
+                                <div class="table-card-metric">
+                                    <span class="table-card-metric-label">Alkohol</span>
+                                    <span class="table-card-metric-value alc"><?= $alc ?></span>
+                                </div>
+                            </div>
+                            <div class="table-card-footer">
+                                <span>WiFi RSSI: <?= $rssi ?></span>
+                                <span>#<?= $r['id'] ?><?= isAdminLoggedIn() ? ' · ' . htmlspecialchars($r['ip_address'] ?? '') : '' ?></span>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+
             <div class="table-responsive">
                 <table class="glass-table">
                     <thead>
@@ -314,10 +389,10 @@ $stats = [
                                 </td>
                             </tr>
                         <?php else: ?>
-                            <?php 
+                            <?php
                                 $prevTimestamp = null;
                                 $offlineTimeout = (int)getSetting('offline_timeout_seconds', 300);
-                                foreach ($records as $r): 
+                                foreach ($records as $r):
                                     $currentTimestamp = strtotime($r['received_at']);
                                     if ($prevTimestamp !== null) {
                                         $gapSeconds = $prevTimestamp - $currentTimestamp;
@@ -338,26 +413,27 @@ $stats = [
                                     }
                                     $prevTimestamp = $currentTimestamp;
                             ?>
-                                <tr class="data-row">
+                                <?php $isValidRecord = !array_key_exists('is_valid', $r) || (bool)$r['is_valid']; ?>
+                                <tr class="data-row" title="<?= $isValidRecord ? '' : htmlspecialchars($r['validation_flags'] ?? 'Data di luar rentang fisik') ?>">
                                     <td>#<?= $r['id'] ?></td>
                                     <td><?= htmlspecialchars($r['received_at']) ?></td>
                                     <td style="color:var(--text-muted); font-size:0.75rem;"><?= formatRelativeTime($r['received_at']) ?></td>
                                     <td>
                                         <span style="color:var(--pink); font-weight:700;">
-                                            <?= $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--' ?>
+                                            <?= $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--' ?>
                                         </span>
                                     </td>
                                     <td>
                                         <span style="color:var(--teal); font-weight:700;">
-                                            <?= $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--' ?>
+                                            <?= $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--' ?>
                                         </span>
                                     </td>
                                     <td>
                                         <span style="color:var(--amber); font-weight:700;">
-                                            <?= $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--' ?>
+                                            <?= $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--' ?>
                                         </span>
                                     </td>
-                                    <td><?= $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : '--' ?></td>
+                                    <td><?= $isValidRecord && $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : 'INVALID' ?></td>
                                     <?php if (isAdminLoggedIn()): ?>
                                     <td style="color:var(--text-subtle); font-size:0.75rem; font-family:var(--font-mono);"><?= htmlspecialchars($r['ip_address'] ?? '127.0.0.1') ?></td>
                                     <?php endif; ?>
@@ -409,12 +485,12 @@ $stats = [
         // -----------------------------------------------
         (function() {
             const filterBtns  = document.querySelectorAll('#histFilterGroup .filter-status-btn');
-            const dataRows     = document.querySelectorAll('tbody .data-row');
-            const offlineRows  = document.querySelectorAll('tbody .downtime-row');
+            const dataRows     = document.querySelectorAll('.data-row');
+            const offlineRows  = document.querySelectorAll('.downtime-row');
 
-            // Hitung jumlah untuk badge
-            const totalData    = dataRows.length;
-            const totalOffline = offlineRows.length;
+            // Hitung jumlah untuk badge (hanya dari table body agar tidak double count)
+            const totalData    = document.querySelectorAll('tbody .data-row').length;
+            const totalOffline = document.querySelectorAll('tbody .downtime-row').length;
 
             // Update label badge awal
             filterBtns.forEach(btn => {
@@ -442,5 +518,6 @@ $stats = [
             });
         })();
     </script>
+    <?php include __DIR__ . '/components/bottom_nav.php'; ?>
 </body>
 </html>

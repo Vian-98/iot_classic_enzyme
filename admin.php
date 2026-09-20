@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_threshold') {
         $deviceId = trim($_POST['device_id'] ?? 'esp32-ce-001');
         $params = ['temp', 'ph', 'alcohol'];
-        $isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         foreach ($params as $param) {
             $minKey = "min_{$param}";
@@ -38,11 +38,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $valMin = isset($_POST[$minKey]) && $_POST[$minKey] !== '' ? (float)$_POST[$minKey] : null;
             $valMax = isset($_POST[$maxKey]) && $_POST[$maxKey] !== '' ? (float)$_POST[$maxKey] : null;
 
-            if ($isMysql) {
+            if ($driver === 'mysql') {
                 $stmt = $db->prepare("
                     INSERT INTO thresholds (device_id, param, val_min, val_max)
                     VALUES (?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE val_min = VALUES(val_min), val_max = VALUES(val_max), updated_at = NOW()
+                ");
+            } elseif ($driver === 'pgsql') {
+                $stmt = $db->prepare("
+                    INSERT INTO thresholds (device_id, param, val_min, val_max)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (device_id, param) DO UPDATE SET val_min = EXCLUDED.val_min, val_max = EXCLUDED.val_max, updated_at = NOW()
                 ");
             } else {
                 $stmt = $db->prepare("
@@ -60,8 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'ack_alarm') {
         $alarmId = (int)($_POST['alarm_id'] ?? 0);
         if ($alarmId > 0) {
-            $isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
-            $now = $isMysql ? 'NOW()' : "datetime('now','localtime')";
+            $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+            $now = ($driver === 'sqlite') ? "datetime('now','localtime')" : "NOW()";
             $stmt = $db->prepare("UPDATE alarms SET acknowledged = 1, ack_at = {$now} WHERE id = ?");
             $stmt->execute([$alarmId]);
             $flash = 'Alarm #' . $alarmId . ' ditandai selesai.';
@@ -70,8 +76,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // --- Ack Semua Alarm ---
     if ($action === 'ack_all') {
-        $isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
-        $now = $isMysql ? 'NOW()' : "datetime('now','localtime')";
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $now = ($driver === 'sqlite') ? "datetime('now','localtime')" : "NOW()";
         $db->exec("UPDATE alarms SET acknowledged = 1, ack_at = {$now} WHERE acknowledged = 0");
         $flash = 'Semua alarm aktif ditandai selesai.';
     }
@@ -244,7 +250,9 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         }
 
         .account-card {
+            width: 100%;
             max-width: 460px;
+            box-sizing: border-box;
             background: rgba(8, 14, 24, 0.45);
             border: 1.5px solid rgba(255, 255, 255, 0.16);
             border-radius: var(--radius-md);
@@ -393,25 +401,36 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
 
         <!-- Navbar -->
         <header class="navbar-dock glass">
-            <div class="brand-section">
-                <a href="admin.php" style="text-decoration:none; display:flex; align-items:center;">
-                    <div>
-                        <h1 class="brand-title">Admin Panel</h1>
-                        <div class="brand-subtitle">Konfigurasi Lanjutan</div>
-                    </div>
-                </a>
+            <!-- Row 1: Brand & Actions -->
+            <div class="navbar-row-1">
+                <div class="brand-section">
+                    <a href="admin.php" style="text-decoration:none; display:flex; align-items:center;">
+                        <div>
+                            <h1 class="brand-title">Admin Panel</h1>
+                            <div class="brand-subtitle">Konfigurasi Lanjutan</div>
+                        </div>
+                    </a>
+                </div>
+                <div class="navbar-row-1-actions">
+                    <a href="index.php" class="glass-btn nav-desktop-only">Dashboard</a>
+                    <a href="history.php" class="glass-btn nav-desktop-only">Riwayat</a>
+                    <span class="status-pill nav-desktop-only" style="width:auto; min-width:0; padding: 0 14px; gap:8px;">
+                        <span style="font-size:0.75rem; color:var(--text-muted);">Admin:</span>
+                        <span style="font-size:0.8rem; font-weight:700; color:var(--teal);"><?= $adminName ?></span>
+                    </span>
+                    <a href="logout.php" class="glass-btn nav-desktop-only" style="color:var(--pink); border-color:var(--pink-border);">Logout</a>
+                    <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
+                        <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
+                    </button>
+                </div>
             </div>
-            <div class="dock-controls">
-                <a href="index.php" class="glass-btn">Dashboard</a>
-                <a href="history.php" class="glass-btn">Riwayat</a>
-                <span class="status-pill" style="width:auto; min-width:0; padding: 0 14px; gap:8px;">
+            <!-- Row 2: Admin info + Logout (mobile) -->
+            <div class="navbar-row-2">
+                <span class="status-pill" style="width:auto; min-width:0; padding: 0 14px; gap:8px; flex:1;">
                     <span style="font-size:0.75rem; color:var(--text-muted);">Admin:</span>
                     <span style="font-size:0.8rem; font-weight:700; color:var(--teal);"><?= $adminName ?></span>
                 </span>
                 <a href="logout.php" class="glass-btn" style="color:var(--pink); border-color:var(--pink-border);">Logout</a>
-                <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema">
-                    <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;"></span>
-                </button>
             </div>
         </header>
 
@@ -456,7 +475,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <!-- Suhu -->
                     <div style="border-left: 3px solid var(--pink); padding-left: 14px; margin-bottom: 20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--pink); text-transform:uppercase; letter-spacing:0.04em;">Suhu Bioreaktor (MAX6675)</div>
+                            <div style="font-size:0.82rem; font-weight:700; color:var(--pink); text-transform:uppercase; letter-spacing:0.04em;">Suhu Fermentasi (MAX6675)</div>
                             <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= ($thresholds['temp']['val_min'] ?? '20') . ' – ' . ($thresholds['temp']['val_max'] ?? '40') ?> °C</strong></span>
                         </div>
                         <div class="form-row">
@@ -504,8 +523,21 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     <!-- Alkohol -->
                     <div style="border-left: 3px solid var(--violet); padding-left: 14px; margin-bottom: 24px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--violet); text-transform:uppercase; letter-spacing:0.04em;">Gas Alkohol MQ-3 (ADC)</div>
-                            <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= !empty($thresholds['alcohol']['val_max']) ? '≤ ' . $thresholds['alcohol']['val_max'] . ' ADC' : 'Anaerob' ?></strong></span>
+                            <div style="font-size:0.82rem; font-weight:700; color:var(--violet); text-transform:uppercase; letter-spacing:0.04em;">Uap Gas Alkohol (MQ-3 ADC)</div>
+                            <?php
+                                $hasAlcMin = isset($thresholds['alcohol']['val_min']) && $thresholds['alcohol']['val_min'] !== null && $thresholds['alcohol']['val_min'] !== '';
+                                $hasAlcMax = isset($thresholds['alcohol']['val_max']) && $thresholds['alcohol']['val_max'] !== null && $thresholds['alcohol']['val_max'] !== '';
+                                if ($hasAlcMin && $hasAlcMax) {
+                                    $dashAlc = $thresholds['alcohol']['val_min'] . ' – ' . $thresholds['alcohol']['val_max'] . ' ADC';
+                                } elseif ($hasAlcMax) {
+                                    $dashAlc = '≤ ' . $thresholds['alcohol']['val_max'] . ' ADC';
+                                } elseif ($hasAlcMin) {
+                                    $dashAlc = '≥ ' . $thresholds['alcohol']['val_min'] . ' ADC';
+                                } else {
+                                    $dashAlc = '≤ 800 ADC (Default)';
+                                }
+                            ?>
+                            <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= htmlspecialchars($dashAlc) ?></strong></span>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -654,7 +686,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                 </td>
                                 <td>
                                     <span style="font-family:var(--font-mono); font-size:0.7rem; background:var(--glass-bg); border:1px solid var(--glass-border); padding:3px 8px; border-radius:6px; user-select:all;">
-                                        <?= htmlspecialchars($dev['api_key']) ?>
+                                        <?= !empty($dev['api_key_hash']) ? '•••••••• (tersimpan aman)' : 'Perlu rotasi ke format hash' ?>
                                     </span>
                                 </td>
                                 <?php 
@@ -676,7 +708,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     </table>
                 </div>
                 <p style="margin-top:16px; font-size:0.73rem; color:var(--text-subtle); line-height:1.5;">
-                    Untuk menambah device baru, masukkan baris baru di tabel <code>devices</code> database dengan device_id dan api_key unik, atau hubungi administrator sistem.
+                    Untuk menambah device baru, gunakan <code>device_id</code> dan API key unik. Nilai key hanya boleh diberikan saat provisioning/rotasi dan tidak ditampilkan ulang di panel.
                 </p>
             </div>
         </section>
@@ -738,18 +770,25 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
     </div><!-- /.app-wrapper -->
 
     <script>
-        // Theme Toggle
+        // Theme toggle — gunakan ikon dan state yang sama dengan dashboard.
         const theme = localStorage.getItem('ce_theme') || 'dark';
-        document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('themeIcon');
-        if (icon) icon.textContent = theme === 'dark' ? 'D' : 'L';
+
+        function applyTheme(nextTheme) {
+            document.documentElement.setAttribute('data-theme', nextTheme);
+            localStorage.setItem('ce_theme', nextTheme);
+
+            if (!icon) return;
+            icon.innerHTML = nextTheme === 'dark'
+                ? '<svg class="icon-theme" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>'
+                : '<svg class="icon-theme" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+        }
+
+        applyTheme(theme);
 
         document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
-            const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-            const nxt = cur === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', nxt);
-            localStorage.setItem('ce_theme', nxt);
-            if (icon) icon.textContent = nxt === 'dark' ? 'D' : 'L';
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            applyTheme(current === 'dark' ? 'light' : 'dark');
         });
 
         // Tab switcher
@@ -773,5 +812,6 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         const flash = document.querySelector('.flash-ok, .flash-err');
         if (flash) flash.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     </script>
+    <?php include __DIR__ . '/components/bottom_nav.php'; ?>
 </body>
 </html>

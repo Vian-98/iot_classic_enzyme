@@ -1,170 +1,203 @@
-# Classic Enzyme IoT — Backend & Liquid Glass Dashboard (v1.0)
+# Classic Enzyme IoT
 
-Sistem monitoring fermentasi Classic Enzyme berbasis **100% Native PHP + Vanilla CSS + Vanilla JS + MySQL**.
-Dirancang khusus untuk keandalan maksimal di cPanel / Shared Hosting maupun VPS tanpa butuh Node.js, npm, ataupun Composer.
+Sistem pemantauan fermentasi berbasis ESP32 untuk bioreaktor *Classic Enzyme*. Perangkat membaca sensor proses, mengirim telemetri melalui HTTP JSON, lalu aplikasi PHP menyimpan data, mengevaluasi ambang batas, dan menyajikannya melalui dashboard web realtime.
 
----
+Proyek ini sengaja tidak memakai MQTT, Node.js, Composer, atau proses background. Arsitektur tersebut membuatnya mudah dijalankan pada PHP hosting biasa, cPanel, VPS, maupun laptop pengembangan. *Realtime* dicapai melalui polling browser, bukan WebSocket.
 
-## Fitur Utama
+> Status implementasi saat ini: firmware mengaktifkan MAX6675 saja secara bawaan. Pembacaan pH dan MQ-3 sudah didukung oleh kode serta skema database, tetapi dinonaktifkan sampai sensor dan kalibrasinya siap.
 
-- **100% Native Vanilla**: Cukup upload file via File Manager cPanel / FTP, langsung aktif.
-- **Nafas Utama Liquid Glass**: Desain antarmuka kaca cair dengan refraksi lensa (SVG Filter `#glass-distortion`), pantulan tepi spekular, dan animasi ambient fluid.
-- **Dual Mode (Cerah & Gelap)**: Beralih tema kapan saja via tombol switch dengan penyimpanan status di browser (`localStorage`).
-- **Pelacakan "Kapan Terakhir Diterima"**: Menghitung selisih waktu secara dinamis ("*3 detik lalu*", "*2 menit lalu*") dan otomatis menandai device **ONLINE** (<= 30 detik) atau **OFFLINE** (> 30 detik).
-- **Pencatatan Histori Lengkap**: Seluruh data tersimpan di tabel `telemetry` dengan timestamp penerimaan di server (`received_at`) dan timestamp internal ESP32 (`device_ts`).
-- **Multi-Sensor Ready**: Siap menerima pembacaan 3 sensor fermentasi:
-  1. Suhu (°C) — **MAX6675**
-  2. pH — **PH-110** (RS485/Analog)
-  3. Alkohol — **MQ-3** (ADC/ppm)
-  4. Kekuatan Sinyal — **WiFi RSSI** (dBm)
-- **Panel Admin Terproteksi**: Dilengkapi halaman login (`/login.php`) dan panel konfigurasi (`/admin.php`) untuk:
-  - Mengubah batas rentang ideal (Threshold Min/Max) Suhu, pH, dan Alkohol secara realtime
-  - Melihat IP Address asli pengirim ESP32 (disembunyikan dari dashboard publik demi keamanan)
-  - Mengelola API Key dan nama bioreaktor
-  - Mengubah password admin
-- **Ekspor Laporan**: Fitur unduh log telemetri ke format CSV untuk analisis laboratorium di Excel (kolom IP hanya muncul saat login sebagai admin).
+## Arsitektur dan aliran data
 
----
-
-## Struktur Berkas
-
+```mermaid
+flowchart LR
+    S[Sensor: MAX6675, pH, MQ-3] --> E[ESP32]
+    E -->|HTTP POST JSON setiap 5 detik| T[api/telemetry.php]
+    T -->|verifikasi, simpan telemetry, last_seen, alarm| D[(PostgreSQL / MySQL / SQLite)]
+    B[Browser dashboard] -->|GET polling| L[latest.php]
+    B -->|GET histori| H[history.php]
+    L --> D
+    H --> D
+    A[Admin terautentikasi] -->|threshold, timeout, acknowledgement| D
 ```
+
+Siklus satu kiriman telemetri:
+
+1. ESP32 membaca sensor yang aktif dan RSSI Wi-Fi.
+2. ESP32 mengirim JSON ke `api/telemetry.php`, membawa `device_id` dan API key.
+3. Endpoint menolak device tidak terdaftar atau API key yang tidak cocok, lalu menyimpan satu baris histori jika valid.
+4. Endpoint memperbarui `devices.last_seen`, menandai status tersimpan `online`, lalu membandingkan nilai terhadap threshold per device. Pelanggaran membuat baris baru di `alarms`.
+5. Dashboard mengambil pembacaan terakhir setiap 3 detik; grafik/tabel histori dimuat ulang setiap 6 detik. Status online yang ditampilkan dihitung dari selisih `last_seen`, sehingga tidak bergantung pada kolom status yang tersimpan.
+
+## Kemampuan yang tersedia
+
+- Dashboard publik untuk suhu, pH, alkohol, RSSI, status koneksi, grafik Chart.js, dan log terakhir. Kartu realtime mengosongkan nilai jika tidak ada telemetri valid dalam 15 detik; data lama tetap tersedia di halaman riwayat.
+- Pemilih device; API dan dashboard mendukung banyak device yang terdaftar.
+- Riwayat dengan rentang `1h`, `6h`, `24h`, `7d`, atau semua data, statistik min/max/rata-rata, serta ekspor CSV hingga 5.000 baris per device.
+- Alarm suhu rendah/tinggi, pH rendah/tinggi, dan alkohol tinggi. Alarm tidak dideduplikasi: setiap pembacaan di luar ambang dapat membuat alarm baru sampai di-*acknowledge*.
+- Panel admin berbasis sesi: ubah threshold, timeout offline, *acknowledge* alarm, lihat API key/IP pengirim terakhir, dan ganti password.
+- Tema terang/gelap disimpan pada `localStorage`; antarmuka memakai CSS/JS native dan gaya Liquid Glass.
+
+## Struktur proyek
+
+```text
 IOT/
-├── config/
-│   ├── database.php         # Koneksi PDO (MySQL dengan auto-fallback SQLite saat dev lokal)
-│   └── auth.php             # Session handler otentikasi & proteksi halaman admin
+├── index.php                         # Dashboard realtime publik
+├── history.php                       # Riwayat, statistik, dan ekspor CSV publik
+├── login.php / logout.php             # Autentikasi admin berbasis session
+├── admin.php                          # Threshold, timeout, alarm, device, akun
 ├── api/
-│   ├── telemetry.php        # [POST] Ingest data ESP32 + update last_seen + alarm check
-│   ├── latest.php           # [GET]  Data realtime & kalkulasi status online/offline
-│   ├── history.php          # [GET]  Data histori untuk grafik Chart.js & filter rentang waktu
-│   └── devices.php          # [GET]  Daftar seluruh bioreaktor terdaftar
-├── db/
-│   ├── schema.sql           # Schema MySQL (devices, telemetry, alarms, admins, thresholds)
-│   └── iot.sqlite           # Database lokal SQLite (otomatis dibuat saat dev offline)
-├── assets/
-│   ├── css/
-│   │   └── style.css        # Sistem desain Liquid Glass, mode cerah/gelap, responsive
-│   └── js/
-│       └── app.js           # Polling 5s, ticker waktu relatif, Chart.js, dynamic thresholds
-├── admin.php                # Panel admin (pengaturan threshold, device, akun)
-├── login.php                # Halaman login admin
-├── logout.php               # Script logout admin
-├── history.php              # Halaman riwayat telemetri, filter rentang waktu & ekspor CSV
-├── index.php                # Dashboard realtime utama berestetika Liquid Glass
-├── .htaccess                # Proteksi akses direktori config/ & db/ (Apache/cPanel)
-├── .gitignore               # Exclude database SQLite, logs, dan secrets dari Git
-└── README.md                # Dokumentasi instalasi dan integrasi firmware ESP32
+│   ├── telemetry.php                  # POST ingest dan evaluasi alarm
+│   ├── latest.php                     # GET pembacaan/device terkini
+│   ├── history.php                    # GET data grafik dan statistik
+│   └── devices.php                    # GET daftar device serta status hitung
+├── config/
+│   ├── database.php                   # PDO, fallback database, schema PG/SQLite
+│   └── auth.php                       # Session dan proteksi admin
+├── db/schema.sql                      # Schema dan seed MySQL
+├── firmware/esp32_classic_enzyme/
+│   └── esp32_classic_enzyme.ino       # Firmware ESP32
+├── scripts/migrate_to_pgsql.php       # Migrasi SQLite → PostgreSQL (konfigurasi lokal)
+├── components/                        # Partial UI dashboard
+├── assets/css/style.css               # Desain responsif Liquid Glass
+├── assets/js/app.js                   # Polling, Chart.js, tema, simulasi
+└── .htaccess                          # Proteksi Apache untuk config/db dan header dasar
 ```
 
----
+## Penyimpanan data
 
-## Akun Login Admin Default
+`config/database.php` memilih driver dari environment `DB_DRIVER`; nilai bawaan adalah `pgsql`. Urutan koneksi aktualnya:
 
-Setelah instalasi (baik via SQLite lokal maupun import `schema.sql` di MySQL):
-- **URL Login**: `http://domain-anda.com/login.php`
-- **Username**: `admin`
-- **Password**: `password`
+1. PostgreSQL jika `DB_DRIVER=pgsql`; schema PostgreSQL dibuat otomatis bila koneksi berhasil.
+2. MySQL jika `DB_DRIVER=mysql`, atau sebagai fallback setelah PostgreSQL gagal.
+3. SQLite di `db/iot.sqlite` jika koneksi di atas tidak tersedia. Schema SQLite dibuat otomatis hanya ketika file database baru dibuat.
 
-> **Sangat Disarankan**: Segera ganti password ini setelah berhasil login pertama kali melalui tab **"Pengaturan Akun"** di dalam panel admin.
+| Tabel | Isi |
+|---|---|
+| `devices` | identitas device, nama/lokasi, API key, dan `last_seen` |
+| `telemetry` | setiap pembacaan sensor, RSSI, firmware, IP, waktu device/server |
+| `thresholds` | batas min/max per parameter dan per `device_id` |
+| `alarms` | pelanggaran threshold dan status acknowledgement |
+| `admins` | username dan hash password |
+| `settings` | konfigurasi global, saat ini `offline_timeout_seconds` |
 
----
+Schema MySQL tersedia pada `db/schema.sql`; PostgreSQL dan SQLite diinisialisasi oleh fungsi dalam `config/database.php`. Default seed adalah device `esp32-ce-001` dengan placeholder API key yang **wajib diganti sebelum dipakai**, threshold suhu `20–40 °C`, pH `3.0–4.5`, alkohol maksimum `800` ADC, dan timeout offline `300` detik.
 
-## Panduan Menjalankan Secara Lokal (Testing di Laptop)
+## Prasyarat
 
-1. Buka Terminal di folder proyek ini:
-   ```bash
-   cd "/Users/favian/Proyek /Classic Enzyme/IOT"
-   ```
-2. Jalankan PHP Built-in Web Server:
-   ```bash
-   php -S 127.0.0.1:8899
-   ```
-3. Buka browser di alamat:
-   ```
-   http://127.0.0.1:8899
-   ```
-   *Catatan: Saat pengujian lokal tanpa konfigurasi MySQL, sistem otomatis menggunakan SQLite lokal (`db/iot.sqlite`) dan menginisialisasi seluruh tabel + admin default secara otomatis.*
+- PHP 8.x dengan ekstensi PDO dan minimal salah satu driver `pdo_pgsql`, `pdo_mysql`, atau `pdo_sqlite`.
+- PostgreSQL, MySQL/MariaDB, atau hak tulis ke direktori `db/` bila memakai SQLite.
+- Browser dengan JavaScript aktif dan akses internet ke CDN Chart.js (`cdn.jsdelivr.net`) untuk grafik.
+- Arduino IDE dengan board ESP32 serta library bawaan `WiFi`, `HTTPClient`, dan `WiFiClientSecure` untuk firmware.
 
-4. Untuk menguji pengiriman data simulasi tanpa ESP32 fisik:
-   - Klik tombol **"⚡ Simulasi Ingest ESP32"** di dashboard, atau
-   - Jalankan perintah curl:
-     ```bash
-     curl -X POST http://127.0.0.1:8899/api/telemetry.php \
-       -H "Content-Type: application/json" \
-       -d '{
-         "device_id": "esp32-ce-001",
-         "api_key": "ce-secret-key-001",
-         "temperature": 35.40,
-         "ph": 3.82,
-         "alcohol": 125,
-         "rssi": -62
-       }'
-     ```
+## Menjalankan lokal
 
----
+Untuk mode paling ringan, paksa SQLite agar hasil tidak bergantung pada database PostgreSQL/MySQL lokal:
 
-## Panduan Deploy ke Hosting / VPS (cPanel, Nginx, Apache)
+```bash
+cd "/Users/favian/Proyek /Classic Enzyme/IOT"
+DB_DRIVER=sqlite php -S 127.0.0.1:8899
+```
 
-### Metode A: Menggunakan MySQL (Disarankan untuk Produksi)
-1. **Buat Database MySQL**:
-   - Masuk ke cPanel > **MySQL Databases**.
-   - Buat database baru (misal: `u1234_classic_enzyme`).
-   - Buat user database dan berikan hak akses penuh (**ALL PRIVILEGES**).
-2. **Import Schema**:
-   - Buka **phpMyAdmin**.
-   - Pilih database tersebut, klik tab **Import**, pilih file `db/schema.sql`.
-   - Ini otomatis membuat 5 tabel: `devices`, `telemetry`, `alarms`, `admins`, dan `thresholds` lengkap dengan data awal.
-3. **Konfigurasi Kredensial Database**:
-   - Buka file `config/database.php`:
-     ```php
-     define('DB_DRIVER', 'mysql');
-     define('DB_HOST',   'localhost'); // atau 127.0.0.1
-     define('DB_NAME',   'u1234_classic_enzyme');
-     define('DB_USER',   'u1234_iotuser');
-     define('DB_PASS',   'PasswordDatabaseAnda');
-     ```
-4. **Upload File**:
-   - Upload seluruh isi folder proyek ke direktori `public_html` (atau subdomain).
-   - Pastikan web server mendukung file `.htaccess` (mod_rewrite aktif) agar folder `config/` dan `db/` terproteksi otomatis.
+Buka <http://127.0.0.1:8899>. File SQLite akan dibuat otomatis bila belum ada. Untuk mencoba ingest tanpa hardware, gunakan tombol simulasi pada dashboard (khusus seed device; API key-nya tertanam untuk pengembangan) atau:
 
-### Metode B: Menggunakan SQLite (Zero Setup di Hosting Murah/VPS)
-1. Cukup upload semua file ke server.
-2. Di `config/database.php`, biarkan default:
-   ```php
-   define('DB_DRIVER', 'sqlite');
-   ```
-3. Pastikan direktori `db/` memiliki permission tulis (CHMOD 755 atau 775) agar file `db/iot.sqlite` dapat ditulis oleh web server.
+```bash
+NOW=$(date +%s)
+curl -X POST http://127.0.0.1:8899/api/telemetry.php \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: API_KEY_DEVICE_ANDA' \
+  -d "{\"device_id\":\"esp32-ce-001\",\"temperature\":35.40,\"ph\":3.82,\"alcohol\":125,\"rssi\":-62,\"firmware\":\"2.0.0\",\"protocol_version\":2,\"ts\":${NOW},\"boot_id\":\"0123456789abcdef0123456789abcdef\",\"sequence\":1}"
+```
 
----
+`api/telemetry.php` hanya menerima API key melalui header `X-API-Key`; key tidak boleh dimasukkan ke JSON body.
 
-## Format Integrasi Firmware ESP32 (HTTP POST)
+## Konfigurasi dan deploy
 
-Setiap interval pembacaan (misal 5 detik), firmware ESP32 mengirim HTTP POST JSON ke endpoint:
-`http://domain-anda.com/api/telemetry.php`
+Gunakan environment variables, bukan mengedit kredensial ke dalam kode:
 
-### JSON Payload:
+```bash
+DB_DRIVER=pgsql          # pgsql, mysql, atau sqlite
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=classic_enzyme_iot
+DB_USER=nama_user
+DB_PASS=password_rahasia
+```
+
+Untuk MySQL produksi, buat database lalu impor `db/schema.sql`; setelah itu jalankan aplikasi dengan `DB_DRIVER=mysql` dan kredensialnya. Untuk PostgreSQL, buat database kosong dan gunakan `DB_DRIVER=pgsql`; aplikasi akan membuat schema saat koneksi pertama berhasil. SQLite cocok untuk pengembangan atau deployment kecil, tetapi direktori `db/` harus dapat ditulis oleh proses PHP.
+
+Letakkan isi folder `IOT` sebagai document root/subdomain. Konfigurasi `.htaccess` memblokir akses browser ke `config/`, `db/`, dan sejumlah ekstensi sensitif pada Apache. Pada Nginx, aturan setara harus dibuat di konfigurasi server; `.htaccess` tidak dibaca Nginx.
+
+## Firmware ESP32
+
+Salin `firmware/esp32_classic_enzyme/secrets.example.h` menjadi `secrets.h`, lalu isi konfigurasi lokal sebelum firmware di-flash. File `secrets.h` diabaikan Git dan ESP32 tetap konek/reconnect Wi-Fi otomatis saat boot:
+
+```cpp
+constexpr char WIFI_SSID[] = "NAMA_WIFI";
+constexpr char WIFI_PASSWORD[] = "PASSWORD_WIFI";
+constexpr char SERVER_URL[] = "https://IP_PUBLIK_VPS_ANDA/api/telemetry.php";
+constexpr char DEVICE_ID[] = "esp32-ce-001";
+constexpr char API_KEY[] = "API_KEY_UNIK_DEVICE";
+```
+
+| Sensor | Pin ESP32 | Catatan |
+|---|---:|---|
+| MAX6675 / termokopel K | SCK 18, SO 19, CS 5 | suhu, diaktifkan bawaan |
+| MQ-3 analog | GPIO 34 | alkohol; input-only |
+| pH analog | GPIO 35 | pH; input-only |
+| LED bawaan | GPIO 2 | menyala ketika proses kirim |
+
+Aktifkan sensor hanya setelah terpasang dengan mengubah `SENSOR_*_TERPASANG` menjadi `true`. Sensor nonaktif atau pembacaan MAX6675 invalid dikirim sebagai `null`, dan `null` tidak memicu alarm parameter tersebut. Pembacaan pH memakai kalibrasi linear (`PH_7_VOLTAGE` dan `PH_SLOPE`) yang harus dikalibrasi terhadap probe Anda; nilai MQ-3 saat ini adalah ADC rata-rata 10 sampel, bukan konsentrasi alkohol terkalibrasi/ppm.
+
+Firmware mengirim setiap 5.000 ms dan mencoba menyambung ulang Wi-Fi sebelum pengiriman. Sebelum telemetri dikirim, firmware menyinkronkan waktu NTP, memverifikasi sertifikat HTTPS dengan `TLS_ROOT_CA`, lalu mengirim timestamp Unix serta `boot_id`/`sequence` untuk anti-replay. Untuk VPS tanpa domain, gunakan URL `https://IP_PUBLIK_VPS/...`, buat sertifikat server dengan IP VPS pada Subject Alternative Name (SAN), lalu isi `TLS_ROOT_CA` dengan CA yang menandatanganinya. Firmware menolak URL non-HTTPS dan menunda kirim bila waktu belum valid. Belum ada antrean flash atau retry persisten ketika internet putus.
+
+Payload yang didukung:
+
 ```json
 {
   "device_id": "esp32-ce-001",
-  "api_key": "ce-secret-key-001",
   "temperature": 34.75,
-  "ph": 3.92,
-  "alcohol": 130,
-  "raw_temp": 14850,
-  "raw_adc": 130,
+  "ph": null,
+  "alcohol": null,
+  "raw_temp": 34.75,
+  "raw_adc": null,
   "rssi": -64,
-  "firmware": "1.0.0",
-  "ts": 1726500000
+  "firmware": "2.0.0",
+  "protocol_version": 2,
+  "ts": 1760000000,
+  "boot_id": "0123456789abcdef0123456789abcdef",
+  "sequence": 42
 }
 ```
 
-### Pin Mapping Rekomendasi Hardware ESP32:
-- **MAX6675 (Termokopel K)**:
-  - SCK = GPIO 18
-  - SO  = GPIO 19
-  - CS  = GPIO 5
-- **PH-110 (RS485 Modbus / Analog)**:
-  - RX = GPIO 16
-  - TX = GPIO 17
-- **MQ-3 (Sensor Alkohol)**:
-  - AO (Analog Out) = GPIO 34 (ADC1)
+Endpoint mengizinkan `POST` dan preflight `OPTIONS`; respons sukses berisi `status`, `telemetry_id`, `server_time`, dan `alarms_count`.
+
+## Kontrak API ringkas
+
+| Endpoint | Akses | Fungsi |
+|---|---|---|
+| `POST /api/telemetry.php` | device + API key | ingest satu pembacaan |
+| `GET /api/latest.php?device_id=…` | publik | nilai terakhir, threshold, status online, jumlah alarm aktif |
+| `GET /api/history.php?device_id=…&range=1h&limit=60&order=asc` | publik | histori (limit 10–1000) dan statistik |
+| `GET /api/devices.php` | publik | daftar device serta pembacaan terakhir |
+
+Rentang API history: `1h`, `6h`, `24h`, `7d`, atau `all`; `order` hanya `asc` atau `desc`. `latest.php` menyembunyikan `ip_address` kecuali sesi admin aktif. Halaman `history.php?action=export_csv` juga hanya menambahkan kolom IP kepada admin.
+
+## Admin dan keamanan operasional
+
+Masuk melalui `/login.php` dengan seed awal `admin` / `password`, lalu segera ganti password. Menu admin mendukung perubahan timeout offline (minimal 30 detik), threshold, dan acknowledgement alarm. Implementasi antarmuka threshold saat ini dipatok ke `esp32-ce-001`, meskipun skema dan endpoint mendukung threshold per device; untuk device tambahan, masukkan record `devices` dan `thresholds` melalui database sampai UI multi-device admin ditambahkan.
+
+Sebelum produksi:
+
+- Ganti API key placeholder dan password admin. API key hanya dikirim pada header `X-API-Key`, disimpan sebagai hash setelah autentikasi pertama, dan tidak ditampilkan ulang di panel admin.
+- Gunakan HTTPS dengan CA penerbit sertifikat yang benar pada `TLS_ROOT_CA`; firmware tidak lagi menerima URL HTTP atau memakai `setInsecure()`.
+- Batasi asal akses endpoint/API dengan firewall atau jaringan privat bila memungkinkan. Endpoint API memakai `Access-Control-Allow-Origin: *` dan belum menerapkan rate limiting.
+- Pastikan `.htaccess` aktif atau buat aturan Nginx ekuivalen, dan jangan simpan database SQLite atau kredensial di web root tanpa proteksi.
+- Cadangkan tabel `telemetry`; tidak ada retensi, agregasi, maupun pembersihan otomatis.
+
+## Batasan yang perlu dipahami
+
+- Alarm dicatat pada setiap sampel out-of-range dan tidak otomatis kembali normal/tertutup.
+- Status offline adalah hasil hitung dari `last_seen` dan `offline_timeout_seconds`; sistem tidak membuat alarm khusus ketika device kemudian menjadi offline.
+- Dashboard publik dan endpoint GET tidak memerlukan login. API key melindungi ingest, bukan pembacaan data.
+- Kode firmware memakai `WiFiClientSecure` bahkan jika `SERVER_URL` masih `http://`; gunakan URL HTTPS dalam deployment atau sesuaikan klien HTTP secara eksplisit.
+- Berkas `scripts/migrate_to_pgsql.php` ditujukan untuk lingkungan lokalnya saat ini: path SQLite dan kredensial PostgreSQL ditulis tetap. Tinjau serta ubah sebelum menjalankannya.

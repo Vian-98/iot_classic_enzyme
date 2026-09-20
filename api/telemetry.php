@@ -1,221 +1,241 @@
 <?php
 /**
- * Classic Enzyme IoT - Ingestion Endpoint
- * Method: POST
- * Format: JSON
- * 
- * Menerima kiriman telemetri dari ESP32, memverifikasi API Key, mencatat histori
- * ke tabel telemetry, memperbarui status koneksi dan 'last_seen' di tabel devices,
- * serta mengecek threshold alarm fermentasi.
+ * Classic Enzyme IoT — Telemetry ingest v2.
+ * API key hanya diterima melalui X-API-Key. Payload v2 menambah timestamp,
+ * boot_id, dan sequence untuk menolak replay request secara atomik.
  */
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
+header('Cache-Control: no-store');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-API-Key, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-API-Key');
 
-// Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+    http_response_code(204);
     exit;
 }
-
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['status' => 'error', 'message' => 'Hanya menerima method POST']);
-    exit;
+    respond(405, 'error', 'Hanya menerima method POST');
 }
 
 require_once __DIR__ . '/../config/database.php';
 
-// Ambil input JSON mentah
-$rawBody = file_get_contents('php://input');
-$data = json_decode($rawBody, true);
-
-if (!$data || !is_array($data)) {
-    http_response_code(400);
-    echo json_encode([
-        'status' => 'error', 
-        'message' => 'Format payload tidak valid. Harap kirimkan valid JSON object.'
-    ]);
-    exit;
+$sourceIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+$rawBody = file_get_contents('php://input', false, null, 0, 16385);
+if (PHP_SAPI === 'cli' && $rawBody === '') {
+    $rawBody = stream_get_contents(STDIN);
+}
+if ($rawBody === false || strlen($rawBody) > 16384) {
+    respond(413, 'error', 'Payload terlalu besar');
 }
 
-// Ekstraksi parameter dengan fallback
-$deviceId = trim($data['device_id'] ?? '');
-$apiKey   = trim($data['api_key'] ?? $_SERVER['HTTP_X_API_KEY'] ?? '');
+$data = json_decode($rawBody, true);
+if (!is_array($data)) {
+    respond(400, 'error', 'Format payload tidak valid');
+}
 
-if (empty($deviceId)) {
-    http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Field device_id wajib diisi']);
-    exit;
+$deviceId = trim((string)($data['device_id'] ?? ''));
+if (!preg_match('/^[A-Za-z0-9_-]{3,64}$/', $deviceId)) {
+    respond(400, 'error', 'device_id tidak valid');
+}
+
+// Tidak ada fallback api_key dari JSON. Header tidak pernah dicatat ke log/event.
+$apiKey = trim((string)($_SERVER['HTTP_X_API_KEY'] ?? ''));
+if ($apiKey === '' || strlen($apiKey) > 255) {
+    respond(401, 'error', 'Autentikasi perangkat gagal');
 }
 
 $db = getDB();
-
-// 1. Verifikasi Device & API Key
-$stmtDevice = $db->prepare("SELECT id, device_id, api_key FROM devices WHERE device_id = ?");
-$stmtDevice->execute([$deviceId]);
-$device = $stmtDevice->fetch();
+$deviceStmt = $db->prepare('SELECT id, device_id, api_key, api_key_hash FROM devices WHERE device_id = ? LIMIT 1');
+$deviceStmt->execute([$deviceId]);
+$device = $deviceStmt->fetch();
 
 if (!$device) {
-    http_response_code(403);
-    echo json_encode([
-        'status' => 'error', 
-        'message' => 'Device ID belum terdaftar di sistem. Hubungi administrator.'
-    ]);
-    exit;
+    $limit = consumeRateLimit($db, 'unknown-ip:' . $sourceIp, 10);
+    recordSecurityEvent($db, 'unknown_device', $deviceId, $sourceIp, 'Telemetry ditolak: device tidak ditemukan');
+    if (!$limit['allowed']) respond(429, 'error', 'Terlalu banyak request', ['retry_after' => $limit['retry_after']]);
+    respond(401, 'error', 'Autentikasi perangkat gagal');
 }
 
-if (!empty($device['api_key']) && $device['api_key'] !== $apiKey) {
-    http_response_code(401);
-    echo json_encode([
-        'status' => 'error', 
-        'message' => 'API Key tidak valid untuk device ini.'
-    ]);
-    exit;
+$authenticated = false;
+if (!empty($device['api_key_hash'])) {
+    $authenticated = password_verify($apiKey, $device['api_key_hash']);
+} elseif (!empty($device['api_key'])) {
+    // Kompatibilitas sementara untuk device lama; hash dibuat segera setelah key valid dipakai.
+    $authenticated = hash_equals((string)$device['api_key'], $apiKey);
+    if ($authenticated) {
+        $hashStmt = $db->prepare('UPDATE devices SET api_key_hash = ? WHERE id = ? AND api_key_hash IS NULL');
+        $hashStmt->execute([password_hash($apiKey, PASSWORD_DEFAULT), $device['id']]);
+    }
 }
 
-// 2. Parsing pembacaan sensor
-// Suhu (MAX6675)
-$temperature = isset($data['temperature']) && is_numeric($data['temperature']) ? (float)$data['temperature'] : null;
+if (!$authenticated) {
+    $limit = consumeRateLimit($db, 'auth-fail-ip:' . $sourceIp, 10);
+    recordSecurityEvent($db, 'invalid_api_key', $deviceId, $sourceIp, 'Telemetry ditolak: autentikasi gagal');
+    if (!$limit['allowed']) respond(429, 'error', 'Terlalu banyak request', ['retry_after' => $limit['retry_after']]);
+    respond(401, 'error', 'Autentikasi perangkat gagal');
+}
 
-// pH (PH-110)
-$ph = isset($data['ph']) && is_numeric($data['ph']) ? (float)$data['ph'] : null;
+$limit = consumeRateLimit($db, 'device:' . $deviceId, 30);
+if (!$limit['allowed']) {
+    recordSecurityEvent($db, 'rate_limited', $deviceId, $sourceIp, 'Batas ingest device terlampaui');
+    respond(429, 'error', 'Terlalu banyak request', ['retry_after' => $limit['retry_after']]);
+}
 
-// Alkohol (MQ-3)
-$alcohol = isset($data['alcohol']) && is_numeric($data['alcohol']) ? (float)$data['alcohol'] : null;
+$protocolVersion = isset($data['protocol_version']) && is_numeric($data['protocol_version'])
+    ? (int)$data['protocol_version'] : 1;
+$deviceTs = isset($data['ts']) && is_numeric($data['ts']) ? (int)$data['ts'] : null;
+$bootId = trim((string)($data['boot_id'] ?? ''));
+$sequence = isset($data['sequence']) && is_numeric($data['sequence']) ? (int)$data['sequence'] : null;
 
-// Raw registers / ADC untuk diagnostik lab
-$rawTemp = isset($data['raw_temp']) && is_numeric($data['raw_temp']) ? (int)$data['raw_temp'] : null;
-$rawAdc  = isset($data['raw_adc']) && is_numeric($data['raw_adc']) ? (int)$data['raw_adc'] : null;
+if ($protocolVersion >= 2) {
+    if ($deviceTs === null || abs(time() - $deviceTs) > 300) {
+        recordSecurityEvent($db, 'stale_timestamp', $deviceId, $sourceIp, 'Timestamp telemetri di luar toleransi');
+        respond(422, 'error', 'Timestamp perangkat tidak valid');
+    }
+    if (!preg_match('/^[a-f0-9]{32}$/i', $bootId) || $sequence === null || $sequence < 1) {
+        respond(422, 'error', 'Identitas request tidak valid');
+    }
+} else {
+    // Firmware v1 tetap dapat bermigrasi, namun tidak mendapat proteksi replay v2.
+    $bootId = null;
+    $sequence = null;
+}
 
-// Sinyal WiFi & Info Firmware
-$rssi        = isset($data['rssi']) && is_numeric($data['rssi']) ? (int)$data['rssi'] : null;
-$firmwareVer = isset($data['firmware']) ? substr(trim($data['firmware']), 0, 20) : '1.0.0';
-$deviceTs    = isset($data['ts']) && is_numeric($data['ts']) ? (int)$data['ts'] : null;
-// Deteksi IP Address asli pengirim (Support Cloudflare Tunnel / Reverse Proxy / LAN)
-$ipAddress = $_SERVER['HTTP_CF_CONNECTING_IP'] 
-          ?? (!empty($_SERVER['HTTP_X_FORWARDED_FOR']) ? trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]) : null)
-          ?? $_SERVER['REMOTE_ADDR'] 
-          ?? null;
+$flags = [];
+$temperature = numericTelemetryValue($data, 'temperature', $flags);
+$ph = numericTelemetryValue($data, 'ph', $flags);
+$alcohol = numericTelemetryValue($data, 'alcohol', $flags);
+$rawTemp = numericTelemetryValue($data, 'raw_temp', $flags);
+$rawAdc = numericTelemetryValue($data, 'raw_adc', $flags);
+$rssi = numericTelemetryValue($data, 'rssi', $flags);
 
+if ($temperature !== null && ($temperature < 0 || $temperature > 100)) $flags[] = 'temperature_out_of_physical_range';
+if ($ph !== null && ($ph < 0 || $ph > 14)) $flags[] = 'ph_out_of_physical_range';
+if ($alcohol !== null && ($alcohol < 0 || $alcohol > 4095)) $flags[] = 'alcohol_out_of_physical_range';
+if ($rawAdc !== null && ($rawAdc < 0 || $rawAdc > 4095)) $flags[] = 'raw_adc_out_of_range';
+if ($rssi !== null && ($rssi < -120 || $rssi > 0)) $flags[] = 'rssi_out_of_range';
+
+$isValid = empty($flags);
+$firmwareVer = isset($data['firmware']) ? substr(trim((string)$data['firmware']), 0, 32) : '1.0.0';
 $serverTime = date('Y-m-d H:i:s');
+$validationFlags = $isValid ? null : json_encode(array_values(array_unique($flags)), JSON_UNESCAPED_SLASHES);
 
 try {
-    // 3. Simpan data ke tabel telemetry (Histori Lengkap)
-    $stmtInsert = $db->prepare("
-        INSERT INTO telemetry (
-            device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
-            rssi, firmware_ver, device_ts, ip_address, received_at
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, 
-            ?, ?, ?, ?, ?
-        )
-    ");
+    $db->beginTransaction();
+    $stmtInsert = $db->prepare('INSERT INTO telemetry (
+        device_id, temperature, ph, alcohol, raw_temp, raw_adc, rssi,
+        firmware_ver, device_ts, ip_address, received_at, boot_id,
+        request_sequence, is_valid, validation_flags
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     $stmtInsert->execute([
-        $deviceId, $temperature, $ph, $alcohol, $rawTemp, $rawAdc,
-        $rssi, $firmwareVer, $deviceTs, $ipAddress, $serverTime
+        $deviceId, $temperature, $ph, $alcohol, $rawTemp, $rawAdc, $rssi,
+        $firmwareVer, $deviceTs, $sourceIp, $serverTime, $bootId,
+        $sequence, $isValid ? 1 : 0, $validationFlags,
     ]);
-    $insertedId = $db->lastInsertId();
+    $insertedId = (int)$db->lastInsertId();
 
-    // 4. Perbarui status koneksi dan 'last_seen' di tabel devices
-    $stmtUpdateDev = $db->prepare("
-        UPDATE devices 
-        SET status = 'online', last_seen = ? 
-        WHERE device_id = ?
-    ");
+    $stmtUpdateDev = $db->prepare("UPDATE devices SET status = 'online', last_seen = ? WHERE device_id = ?");
     $stmtUpdateDev->execute([$serverTime, $deviceId]);
 
-    // 5. Cek Ambang Batas (Alarm Check) menggunakan threshold dari database
-    $stmtThresh = $db->prepare("SELECT param, val_min, val_max FROM thresholds WHERE device_id = ?");
-    $stmtThresh->execute([$deviceId]);
-    $threshMap = [];
-    while ($t = $stmtThresh->fetch()) {
-        $threshMap[$t['param']] = $t;
+    $alarmsTriggered = $isValid ? evaluateAlarms($db, $deviceId, $temperature, $ph, $alcohol, $serverTime) : [];
+    $db->commit();
+
+    respond(200, 'ok', 'Telemetry received successfully', [
+        'telemetry_id' => $insertedId,
+        'server_time' => $serverTime,
+        'alarms_count' => count($alarmsTriggered),
+        'is_valid' => $isValid,
+        'validation_flags' => $isValid ? [] : json_decode($validationFlags, true),
+    ]);
+} catch (PDOException $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    if ($protocolVersion >= 2 && isUniqueViolation($e)) {
+        recordSecurityEvent($db, 'replay_rejected', $deviceId, $sourceIp, 'Duplikasi boot_id dan sequence');
+        respond(409, 'error', 'Request telemetri duplikat');
     }
+    error_log('Telemetry insert failed: ' . $e->getMessage());
+    respond(500, 'error', 'Gagal menyimpan data telemetri');
+}
 
-    $tempMin = isset($threshMap['temp']['val_min']) && $threshMap['temp']['val_min'] !== null ? (float)$threshMap['temp']['val_min'] : 20.0;
-    $tempMax = isset($threshMap['temp']['val_max']) && $threshMap['temp']['val_max'] !== null ? (float)$threshMap['temp']['val_max'] : 40.0;
-    $phMin   = isset($threshMap['ph']['val_min']) && $threshMap['ph']['val_min'] !== null ? (float)$threshMap['ph']['val_min'] : 3.0;
-    $phMax   = isset($threshMap['ph']['val_max']) && $threshMap['ph']['val_max'] !== null ? (float)$threshMap['ph']['val_max'] : 5.0;
-    $alcMax  = isset($threshMap['alcohol']['val_max']) && $threshMap['alcohol']['val_max'] !== null ? (float)$threshMap['alcohol']['val_max'] : null;
-
-    $alarmsTriggered = [];
-
-    if ($temperature !== null && $tempMax !== null && $temperature > $tempMax) {
-        $alarmsTriggered[] = [
-            'type' => 'temp_high',
-            'severity' => 'critical',
-            'threshold' => $tempMax,
-            'actual' => $temperature,
-            'msg' => "Suhu bioreaktor mencapai {$temperature}°C (melebihi ambang batas {$tempMax}°C)!"
-        ];
-    } elseif ($temperature !== null && $tempMin !== null && $temperature < $tempMin) {
-        $alarmsTriggered[] = [
-            'type' => 'temp_low',
-            'severity' => 'warning',
-            'threshold' => $tempMin,
-            'actual' => $temperature,
-            'msg' => "Suhu bioreaktor turun ke {$temperature}°C (di bawah batas ideal {$tempMin}°C)."
-        ];
+function numericTelemetryValue(array $data, string $key, array &$flags): ?float {
+    if (!array_key_exists($key, $data) || $data[$key] === null || $data[$key] === '') return null;
+    if (!is_numeric($data[$key])) {
+        $flags[] = $key . '_not_numeric';
+        return null;
     }
+    return (float)$data[$key];
+}
 
-    if ($ph !== null && $phMax !== null && $ph > $phMax) {
-        $alarmsTriggered[] = [
-            'type' => 'ph_high',
-            'severity' => 'warning',
-            'threshold' => $phMax,
-            'actual' => $ph,
-            'msg' => "Nilai pH {$ph} terlalu basa (melebihi ambang {$phMax})."
-        ];
-    } elseif ($ph !== null && $phMin !== null && $ph < $phMin) {
-        $alarmsTriggered[] = [
-            'type' => 'ph_low',
-            'severity' => 'warning',
-            'threshold' => $phMin,
-            'actual' => $ph,
-            'msg' => "Nilai pH {$ph} terlalu asam (di bawah ambang {$phMin})."
-        ];
-    }
+function evaluateAlarms(PDO $db, string $deviceId, ?float $temperature, ?float $ph, ?float $alcohol, string $serverTime): array {
+    $stmt = $db->prepare('SELECT param, val_min, val_max FROM thresholds WHERE device_id = ?');
+    $stmt->execute([$deviceId]);
+    $thresholds = [];
+    while ($row = $stmt->fetch()) $thresholds[$row['param']] = $row;
 
-    if ($alcohol !== null && $alcMax !== null && $alcohol > $alcMax) {
-        $alarmsTriggered[] = [
-            'type' => 'alcohol_high',
-            'severity' => 'warning',
-            'threshold' => $alcMax,
-            'actual' => $alcohol,
-            'msg' => "Konsentrasi alkohol mencapai ADC {$alcohol} (melebihi ambang {$alcMax})!"
-        ];
-    }
-
-    // Catat alarm jika ada yang terpicu
-    if (!empty($alarmsTriggered)) {
-        $stmtAlarm = $db->prepare("
-            INSERT INTO alarms (device_id, alarm_type, severity, threshold_val, actual_val, message, triggered_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ");
-        foreach ($alarmsTriggered as $alm) {
-            $stmtAlarm->execute([
-                $deviceId, $alm['type'], $alm['severity'], $alm['threshold'], $alm['actual'], $alm['msg'], $serverTime
-            ]);
+    $checks = [
+        ['temp', $temperature, 'Suhu fermentasi', '°C', 'critical'],
+        ['ph', $ph, 'Nilai pH', '', 'warning'],
+        ['alcohol', $alcohol, 'Konsentrasi alkohol ADC', '', 'warning'],
+    ];
+    $alarms = [];
+    foreach ($checks as [$param, $actual, $label, $unit, $severity]) {
+        if ($actual === null || !isset($thresholds[$param])) continue;
+        $min = $thresholds[$param]['val_min'] !== null ? (float)$thresholds[$param]['val_min'] : null;
+        $max = $thresholds[$param]['val_max'] !== null ? (float)$thresholds[$param]['val_max'] : null;
+        if ($max !== null && $actual > $max) {
+            $alarms[] = [$param . '_high', $severity, $max, $actual, "{$label} {$actual}{$unit} melebihi ambang {$max}{$unit}."];
+        } elseif ($min !== null && $actual < $min) {
+            $alarms[] = [$param . '_low', $param === 'temp' ? 'warning' : $severity, $min, $actual, "{$label} {$actual}{$unit} di bawah ambang {$min}{$unit}."];
         }
     }
+    if ($alarms) {
+        $insert = $db->prepare('INSERT INTO alarms (device_id, alarm_type, severity, threshold_val, actual_val, message, triggered_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        foreach ($alarms as $alarm) $insert->execute([$deviceId, ...$alarm, $serverTime]);
+    }
+    return $alarms;
+}
 
-    // 6. Kembalikan respons sukses ke ESP32
-    http_response_code(200);
-    echo json_encode([
-        'status' => 'ok',
-        'message' => 'Telemetry received successfully',
-        'telemetry_id' => (int)$insertedId,
-        'server_time' => $serverTime,
-        'alarms_count' => count($alarmsTriggered)
-    ]);
+function consumeRateLimit(PDO $db, string $scope, int $maxRequests): array {
+    $now = date('Y-m-d H:i:s');
+    $window = date('Y-m-d H:i:00');
+    $existing = $db->prepare('SELECT blocked_until FROM ingest_rate_limits WHERE scope = ? AND blocked_until > ? ORDER BY blocked_until DESC LIMIT 1');
+    $existing->execute([$scope, $now]);
+    $blockedUntil = $existing->fetchColumn();
+    if ($blockedUntil) return ['allowed' => false, 'retry_after' => max(1, strtotime($blockedUntil) - time())];
 
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Gagal menyimpan data ke database: ' . $e->getMessage()
-    ]);
+    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+    $sql = $driver === 'mysql'
+        ? 'INSERT INTO ingest_rate_limits (scope, window_start, request_count) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE request_count = request_count + 1'
+        : 'INSERT INTO ingest_rate_limits (scope, window_start, request_count) VALUES (?, ?, 1) ON CONFLICT(scope, window_start) DO UPDATE SET request_count = ingest_rate_limits.request_count + 1';
+    $stmt = $db->prepare($sql);
+    $stmt->execute([$scope, $window]);
+    $countStmt = $db->prepare('SELECT request_count FROM ingest_rate_limits WHERE scope = ? AND window_start = ?');
+    $countStmt->execute([$scope, $window]);
+    $count = (int)$countStmt->fetchColumn();
+    if ($count <= $maxRequests) return ['allowed' => true, 'retry_after' => 0];
+
+    $blockedUntil = date('Y-m-d H:i:s', time() + 300);
+    $block = $db->prepare('UPDATE ingest_rate_limits SET blocked_until = ? WHERE scope = ? AND window_start = ?');
+    $block->execute([$blockedUntil, $scope, $window]);
+    return ['allowed' => false, 'retry_after' => 300];
+}
+
+function recordSecurityEvent(PDO $db, string $type, ?string $deviceId, string $sourceIp, string $detail): void {
+    try {
+        $stmt = $db->prepare('INSERT INTO security_events (event_type, device_id, source_ip, detail) VALUES (?, ?, ?, ?)');
+        $stmt->execute([$type, $deviceId, substr($sourceIp, 0, 64), substr($detail, 0, 250)]);
+    } catch (Throwable $e) {
+        error_log('Security event logging failed');
+    }
+}
+
+function isUniqueViolation(PDOException $e): bool {
+    return in_array($e->getCode(), ['23000', '23505'], true);
+}
+
+function respond(int $statusCode, string $status, string $message, array $extra = []): never {
+    http_response_code($statusCode);
+    echo json_encode(array_merge(['status' => $status, 'message' => $message], $extra), JSON_UNESCAPED_SLASHES);
+    exit;
 }

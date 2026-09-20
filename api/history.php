@@ -33,20 +33,28 @@ $db = getDB();
 $timeCondition = '';
 $params = [$deviceId];
 
-$isMysql = ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql');
+$driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
 
 switch ($range) {
     case '1h':
-        $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)" : "AND received_at >= datetime('now', '-1 hour', 'localtime')";
+        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)";
+        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '1 hour'";
+        else                          $timeCondition = "AND received_at >= datetime('now', '-1 hour', 'localtime')";
         break;
     case '6h':
-        $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)" : "AND received_at >= datetime('now', '-6 hours', 'localtime')";
+        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)";
+        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '6 hours'";
+        else                          $timeCondition = "AND received_at >= datetime('now', '-6 hours', 'localtime')";
         break;
     case '24h':
-        $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)" : "AND received_at >= datetime('now', '-24 hours', 'localtime')";
+        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)";
+        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '24 hours'";
+        else                          $timeCondition = "AND received_at >= datetime('now', '-24 hours', 'localtime')";
         break;
     case '7d':
-        $timeCondition = $isMysql ? "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)" : "AND received_at >= datetime('now', '-7 days', 'localtime')";
+        if ($driver === 'mysql')      $timeCondition = "AND received_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+        elseif ($driver === 'pgsql')  $timeCondition = "AND received_at >= NOW() - INTERVAL '7 days'";
+        else                          $timeCondition = "AND received_at >= datetime('now', '-7 days', 'localtime')";
         break;
     case 'all':
     default:
@@ -59,7 +67,7 @@ try {
     $sql = "
         SELECT * FROM (
             SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
-                   rssi, firmware_ver, device_ts, ip_address, received_at
+                   rssi, firmware_ver, device_ts, ip_address, received_at, is_valid, validation_flags
             FROM telemetry
             WHERE device_id = ? {$timeCondition}
             ORDER BY received_at DESC, id DESC
@@ -79,9 +87,10 @@ try {
     $alcohols = [];
 
     foreach ($rows as $r) {
-        $temp = $r['temperature'] !== null ? (float)$r['temperature'] : null;
-        $ph   = $r['ph'] !== null ? (float)$r['ph'] : null;
-        $alc  = $r['alcohol'] !== null ? (float)$r['alcohol'] : null;
+        $isValid = (bool)$r['is_valid'];
+        $temp = $isValid && $r['temperature'] !== null ? (float)$r['temperature'] : null;
+        $ph   = $isValid && $r['ph'] !== null ? (float)$r['ph'] : null;
+        $alc  = $isValid && $r['alcohol'] !== null ? (float)$r['alcohol'] : null;
 
         if ($temp !== null) $temps[] = $temp;
         if ($ph !== null) $phs[] = $ph;
@@ -93,6 +102,8 @@ try {
             'datetime' => $r['received_at'],
             'epoch' => strtotime($r['received_at']),
             'relative_time' => formatRelativeTime($r['received_at']),
+            'is_valid' => $isValid,
+            'validation_flags' => $r['validation_flags'] ? json_decode($r['validation_flags'], true) : [],
             'temperature' => $temp,
             'ph' => $ph,
             'alcohol' => $alc,

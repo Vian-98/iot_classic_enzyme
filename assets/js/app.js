@@ -14,8 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lastSeenTimestamp: null,
         lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
         pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
+        realtimeStaleAfterSeconds: 15, // Data lebih lama dianggap stale di dashboard
         offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
-        deviceStatusFilter: 'all',  // 'all' | 'online' | 'offline'
         deviceMap: {},              // { device_id: { is_online, device_name } }
         tableFilter: 'all',         // 'all' | 'valid' | 'offline'
         chartInstance: null,
@@ -49,10 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
         chartCanvas: document.getElementById('telemetryChart'),
         chartRangeTabs: document.querySelectorAll('.chart-tab-btn'),
         historyTableBody: document.getElementById('historyTableBody'),
+        historyCardList: document.getElementById('historyCardList'),
         btnRefresh: document.getElementById('btnRefresh'),
-        btnSimulate: document.getElementById('btnSimulate'),
         toastContainer: document.getElementById('toastContainer'),
-        filterDeviceBtns: document.querySelectorAll('#deviceStatusFilter .filter-status-btn'),
         filterTableBtns: document.querySelectorAll('#realtimeTableFilter .filter-status-btn'),
     };
 
@@ -266,24 +265,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return m > 0 ? `${h} jam ${m} menit lalu` : `${h} jam lalu`;
         }
 
-        // Format durasi offline saja (tanpa "lalu")
-        function formatOfflineDuration(secs) {
-            if (secs < 60)  return `${secs} detik`;
-            if (secs < 3600) return `${Math.floor(secs / 60)} menit`;
-            const h = Math.floor(secs / 3600);
-            const m = Math.floor((secs % 3600) / 60);
-            return m > 0 ? `${h} jam ${m} menit` : `${h} jam`;
-        }
-
         // Jika melebihi batas toleransi offline
         if (diff > timeout) {
-            const offlineDuration = formatOfflineDuration(diff);
-            el.statusLastSeen.textContent = `Offline sejak ${formatOfflineDuration(diff)} yang lalu`;
+            el.statusLastSeen.textContent = `Terakhir: ${formatDiff(diff)}`;
             if (el.statusPill) {
                 el.statusPill.classList.remove('online');
                 el.statusPill.classList.add('offline');
             }
-            if (el.statusText) el.statusText.textContent = `OFFLINE · ${offlineDuration}`;
+            if (el.statusText) el.statusText.textContent = 'OFFLINE';
         } else {
             el.statusLastSeen.textContent = `Terakhir: ${formatDiff(diff)}`;
             if (el.statusPill) {
@@ -303,6 +292,38 @@ document.addEventListener('DOMContentLoaded', () => {
             // Trigger reflow to restart animation
             void element.offsetWidth;
             element.classList.add('val-updated');
+        }
+    }
+
+    // Dashboard realtime tidak boleh mempertahankan nilai lama ketika ESP32
+    // berhenti mengirim. Histori tetap menyimpan data tersebut.
+    function clearRealtimeMetrics() {
+        pulseOnChange(el.valTemp, '--');
+        pulseOnChange(el.valPh, '--');
+        pulseOnChange(el.valAlcohol, '--');
+        pulseOnChange(el.valRssi, '--');
+        if (el.valFirmware) el.valFirmware.textContent = '—';
+
+        const cards = [
+            [el.badgeTemp, 'OFF', el.footerTemp],
+            [el.badgePh, 'OFF', el.footerPh],
+            [el.badgeAlcohol, 'OFF', el.footerAlcohol],
+        ];
+        cards.forEach(([badge, label, footer]) => {
+            if (badge) {
+                badge.textContent = label;
+                badge.className = 'sensor-badge badge-slate';
+            }
+            // Status stale/offline cukup ditampilkan pada status pill navbar;
+            // jangan mengulang pesan yang sama di setiap kartu sensor.
+            if (footer) footer.textContent = '—';
+        });
+
+        const chip = document.getElementById('statusChip');
+        if (chip) {
+            chip.textContent = '—';
+            chip.style.background = '';
+            chip.style.color = '';
         }
     }
 
@@ -327,6 +348,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (dev.last_seen) {
                     state.lastSeenTimestamp = Math.floor(new Date(dev.last_seen).getTime() / 1000);
                     updateRelativeTimeCounter();
+                } else {
+                    state.lastSeenTimestamp = null;
+                    if (el.statusPill) {
+                        el.statusPill.classList.remove('online');
+                        el.statusPill.classList.add('offline');
+                    }
+                    if (el.statusText) el.statusText.textContent = 'OFFLINE';
+                    if (el.statusLastSeen) el.statusLastSeen.textContent = 'Belum pernah menerima data';
                 }
 
                 // Helper format rentang ideal
@@ -343,7 +372,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update Metric Display & Dynamic Ideal Ranges
                 const th = json.thresholds || {};
 
-                if (tel) {
+                // `offline_timeout` adalah status konektivitas umum (default 5 menit),
+                // sedangkan dashboard memakai jendela realtime ketat 15 detik.
+                const secondsSinceTelemetry = Number(dev.seconds_ago);
+                const isRealtime = Boolean(tel && dev.is_online && tel.is_valid !== false &&
+                    Number.isFinite(secondsSinceTelemetry) &&
+                    secondsSinceTelemetry <= state.realtimeStaleAfterSeconds);
+
+                if (!isRealtime && dev.is_online && el.statusText) {
+                    el.statusText.textContent = 'ONLINE · DATA STALE';
+                }
+
+                if (tel && isRealtime) {
                     // Deteksi jika ada rekaman baru masuk: langsung refresh grafik & tabel tanpa delay!
                     const isNewRecord = (state.lastTelemetryId !== null && tel.id !== state.lastTelemetryId);
                     state.lastTelemetryId = tel.id;
@@ -391,19 +431,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (el.badgeAlcohol && el.footerAlcohol) {
                         if (tel.alcohol !== null) {
                             const alcVal = tel.alcohol;
-                            const maxAlc = th.alcohol?.max || 800;
+                            const maxAlc = th.alcohol?.max !== null && th.alcohol?.max !== undefined ? th.alcohol.max : 800;
+                            const minAlc = th.alcohol?.min !== null && th.alcohol?.min !== undefined ? th.alcohol.min : null;
                             let alcBadgeClass = 'sensor-badge badge-teal';
-                            let alcBadgeText = 'HALAL (AMAN)';
-                            if (alcVal > maxAlc) {
+                            let alcBadgeText = 'AMAN';
+                            if (maxAlc !== null && alcVal > maxAlc) {
                                 alcBadgeClass = 'sensor-badge badge-pink';
                                 alcBadgeText = 'WASPADA (> ' + maxAlc + ')';
-                            } else if (alcVal >= 400) {
+                            } else if (minAlc !== null && alcVal < minAlc) {
+                                alcBadgeClass = 'sensor-badge badge-warning';
+                                alcBadgeText = 'RENDAH';
+                            } else if (maxAlc !== null && alcVal >= maxAlc * 0.75) {
                                 alcBadgeClass = 'sensor-badge badge-amber';
                                 alcBadgeText = 'TRANSISI';
                             }
                             el.badgeAlcohol.className = alcBadgeClass;
                             el.badgeAlcohol.textContent = alcBadgeText;
-                            el.footerAlcohol.textContent = 'Batas Maksimal: ≤ ' + maxAlc + ' ADC';
+                            el.footerAlcohol.textContent = formatThresholdRange(th.alcohol, 'ADC', '≤ 800 ADC');
                         } else {
                             el.badgeAlcohol.textContent = 'OFF';
                             el.badgeAlcohol.className = 'sensor-badge badge-slate';
@@ -434,10 +478,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (isNewRecord) {
                         fetchHistoryData();
                     }
+                } else {
+            clearRealtimeMetrics();
                 }
             }
         } catch (err) {
             console.warn('Gagal mengambil data terbaru:', err);
+            clearRealtimeMetrics('Koneksi dashboard gagal');
         }
     }
 
@@ -513,10 +560,16 @@ document.addEventListener('DOMContentLoaded', () => {
             el.historyTableBody.innerHTML = `
                 <tr>
                     <td colspan="6" style="text-align:center; color:var(--text-muted); padding:28px;">
-                        Belum ada rekaman data telemetri. Kirimkan data pertama via ESP32 atau tombol Simulasi.
+                        Belum ada rekaman data telemetri. Kirimkan data pertama melalui ESP32.
                     </td>
                 </tr>
             `;
+            if (el.historyCardList) {
+                el.historyCardList.innerHTML = `
+                    <div class="table-card-item" style="text-align:center; color:var(--text-muted); padding:24px;">
+                        Belum ada rekaman data telemetri.
+                    </div>`;
+            }
             return;
         }
 
@@ -554,19 +607,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             prevEpoch = currentEpoch;
 
-            countValid++;
-            const isHidden = (state.tableFilter === 'offline') ? 'style="display:none;"' : '';
+            const isValid = row.is_valid !== false;
+            if (isValid) countValid++;
+            const isHidden = (state.tableFilter === 'offline' || (state.tableFilter === 'valid' && !isValid)) ? 'style="display:none;"' : '';
             tableHtml += `
                 <tr class="data-row" ${isHidden}>
                     <td>
                         <strong>${escapeHtml(row.time)}</strong>
                         <span style="font-size:0.68rem; color:var(--teal); margin-left:5px; background:var(--teal-soft); padding:1px 6px; border-radius:4px;">${escapeHtml(row.relative_time || 'Baru saja')}</span>
                     </td>
-                    <td><span style="color:var(--pink); font-weight:700;">${row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
-                    <td><span style="color:var(--teal); font-weight:700;">${row.ph !== null ? row.ph : '--'}</span></td>
-                    <td><span style="color:var(--amber); font-weight:700;">${row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span></td>
-                    <td>${row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
-                    <td><span class="sensor-badge badge-teal" style="font-size:0.65rem;">VALID</span></td>
+                    <td><span style="color:var(--pink); font-weight:700;">${isValid && row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
+                    <td><span style="color:var(--teal); font-weight:700;">${isValid && row.ph !== null ? row.ph : '--'}</span></td>
+                    <td><span style="color:var(--amber); font-weight:700;">${isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span></td>
+                    <td>${isValid && row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
+                    <td><span class="sensor-badge ${isValid ? 'badge-teal' : 'badge-pink'}" style="font-size:0.65rem;">${isValid ? 'VALID' : 'INVALID'}</span></td>
                 </tr>
             `;
         });
@@ -585,6 +639,76 @@ document.addEventListener('DOMContentLoaded', () => {
 
         el.historyTableBody.innerHTML = tableHtml;
         updateTableFilterBadges(countValid, countOffline);
+
+        // Render card-view untuk mobile
+        renderHistoryCards(recentRows, offlineThreshold);
+    }
+
+    /**
+     * Render card-view untuk mobile (< 640px) — data yang sama dengan tabel
+     */
+    function renderHistoryCards(rows, offlineThreshold) {
+        if (!el.historyCardList) return;
+        let cardHtml = '';
+        let prevEpoch = null;
+
+        rows.forEach(row => {
+            const currentEpoch = row.epoch || (row.datetime ? Math.floor(new Date(row.datetime).getTime() / 1000) : null);
+
+            // Indikator offline gap antar card
+            if (prevEpoch !== null && currentEpoch !== null) {
+                const gapSeconds = prevEpoch - currentEpoch;
+                if (gapSeconds > offlineThreshold) {
+                    const gapHrs  = Math.floor(gapSeconds / 3600);
+                    const gapMins = Math.floor((gapSeconds % 3600) / 60);
+                    const gapLabel = gapHrs > 0 ? `${gapHrs} jam ${gapMins} menit` : `${gapMins} menit`;
+                    cardHtml += `
+                        <div class="table-card-downtime">
+                            <span class="downtime-dot" style="width:8px;height:8px;border-radius:50%;background:var(--pink);flex-shrink:0;"></span>
+                            <span><strong>OFFLINE</strong> selama <strong>${gapLabel}</strong></span>
+                        </div>`;
+                }
+            }
+            prevEpoch = currentEpoch;
+
+            const isValid = row.is_valid !== false;
+            const temp  = isValid && row.temperature !== null ? row.temperature + ' °C' : '--';
+            const ph    = isValid && row.ph !== null ? row.ph : '--';
+            const alc   = isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--';
+            const rssi  = isValid && row.rssi !== null ? row.rssi + ' dBm' : '--';
+            const relT  = escapeHtml(row.relative_time || 'Baru saja');
+
+            cardHtml += `
+                <div class="table-card-item data-row">
+                    <div class="table-card-header">
+                        <span class="table-card-time">${escapeHtml(row.time)}</span>
+                        <span class="table-card-rel">${relT}</span>
+                    </div>
+                    <div class="table-card-grid">
+                        <div class="table-card-metric">
+                            <span class="table-card-metric-label">Suhu</span>
+                            <span class="table-card-metric-value temp">${temp}</span>
+                        </div>
+                        <div class="table-card-metric">
+                            <span class="table-card-metric-label">pH</span>
+                            <span class="table-card-metric-value ph">${ph}</span>
+                        </div>
+                        <div class="table-card-metric">
+                            <span class="table-card-metric-label">Alkohol</span>
+                            <span class="table-card-metric-value alc">${alc}</span>
+                        </div>
+                    </div>
+                    <div class="table-card-footer">
+                        <span>WiFi RSSI: ${rssi}</span>
+                        <span class="sensor-badge ${isValid ? 'badge-teal' : 'badge-pink'}" style="font-size:0.65rem;">${isValid ? 'VALID' : 'INVALID'}</span>
+                    </div>
+                </div>`;
+        });
+
+        el.historyCardList.innerHTML = cardHtml || `
+            <div class="table-card-item" style="text-align:center; color:var(--text-muted); padding:24px;">
+                Tidak ada data untuk ditampilkan.
+            </div>`;
     }
 
     // --------------------------------------------------------------------------
@@ -602,14 +726,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --------------------------------------------------------------------------
-    // 7b. FILTER STATUS DEVICE (Semua / Online / Offline)
+    // 7b. SINKRONISASI METADATA DEVICE
     // --------------------------------------------------------------------------
 
     /**
-     * Ambil daftar device dari API, simpan status ke state.deviceMap,
-     * lalu terapkan filter ke opsi dropdown.
+     * Ambil metadata status device dari API untuk sinkronisasi timeout offline
      */
-    async function fetchAndApplyDeviceFilter() {
+    async function fetchDeviceMetadata() {
         try {
             const res = await fetch('api/devices.php');
             const json = await res.json();
@@ -629,87 +752,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     relative_time: dev.relative_time,
                 };
             });
-
-            applyDeviceFilter();
         } catch (err) {
-            console.warn('Gagal memuat daftar device:', err);
+            console.warn('Gagal memuat metadata device:', err);
         }
-    }
-
-    /**
-     * Terapkan filter visual ke opsi di dalam <select#deviceSelect>
-     * berdasarkan state.deviceStatusFilter ('all'|'online'|'offline')
-     */
-    function applyDeviceFilter() {
-        if (!el.deviceSelect) return;
-        const filterVal = state.deviceStatusFilter;
-        const options = el.deviceSelect.querySelectorAll('option');
-
-        let firstVisibleValue = null;
-        options.forEach(opt => {
-            const devId = opt.value;
-            const devStatus = state.deviceMap[devId];
-
-            // Jika belum ada di map (baru dimuat), tampilkan saja
-            if (!devStatus) {
-                opt.hidden = false;
-                if (!firstVisibleValue) firstVisibleValue = devId;
-                return;
-            }
-
-            let visible = true;
-            if (filterVal === 'online')  visible = devStatus.is_online;
-            if (filterVal === 'offline') visible = !devStatus.is_online;
-
-            opt.hidden = !visible;
-            if (visible && !firstVisibleValue) firstVisibleValue = devId;
-        });
-
-        // Jika device yang sedang aktif tersembunyi, otomatis pindah ke device pertama yang terlihat
-        const currentOpt = el.deviceSelect.querySelector(`option[value="${state.currentDeviceId}"]`);
-        if (currentOpt && currentOpt.hidden && firstVisibleValue) {
-            el.deviceSelect.value = firstVisibleValue;
-            state.currentDeviceId = firstVisibleValue;
-            fetchLatestData();
-            fetchHistoryData();
-        } else if (!currentOpt && firstVisibleValue) {
-            el.deviceSelect.value = firstVisibleValue;
-            state.currentDeviceId = firstVisibleValue;
-            fetchLatestData();
-            fetchHistoryData();
-        }
-
-        // Update label filter button device agar tampilkan jumlah
-        const total   = Object.keys(state.deviceMap).length;
-        const online  = Object.values(state.deviceMap).filter(d => d.is_online).length;
-        const offline = total - online;
-
-        if (el.filterDeviceBtns) {
-            el.filterDeviceBtns.forEach(btn => {
-                const s = btn.getAttribute('data-status');
-                if (s === 'all')     btn.textContent = total   > 0 ? `Semua (${total})`   : 'Semua';
-                if (s === 'online')  btn.innerHTML   = online  > 0
-                    ? `<span class="filter-dot online"></span>Online (${online})`
-                    : `<span class="filter-dot online"></span>Online`;
-                if (s === 'offline') btn.innerHTML   = offline > 0
-                    ? `<span class="filter-dot offline"></span>Offline (${offline})`
-                    : `<span class="filter-dot offline"></span>Offline`;
-            });
-        }
-    }
-
-    // Event listener tombol filter status perangkat di header
-    if (el.filterDeviceBtns) {
-        el.filterDeviceBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                el.filterDeviceBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                state.deviceStatusFilter = btn.getAttribute('data-status') || 'all';
-                applyDeviceFilter();
-                const label = { all: 'Semua', online: 'Online Saja', offline: 'Offline Saja' };
-                showToast(`Filter perangkat: ${label[state.deviceStatusFilter] || ''}`);
-            });
-        });
     }
 
     // --------------------------------------------------------------------------
@@ -797,57 +842,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Tombol Simulasi Kirim Data ESP32 (Testing tanpa hardware)
-    if (el.btnSimulate) {
-        el.btnSimulate.addEventListener('click', async () => {
-            try {
-                // Generate data sensor acak realistis
-                // Suhu fermentasi normal: 32 - 37°C
-                const simTemp = (33.0 + Math.random() * 4.5).toFixed(2);
-                // pH asam Classic Enzyme normal: 3.4 - 4.2
-                const simPh = (3.4 + Math.random() * 0.8).toFixed(2);
-                // Nilai alkohol MQ-3: 80 - 180
-                const simAlcohol = Math.floor(90 + Math.random() * 110);
-                const simRssi = -Math.floor(55 + Math.random() * 20);
-
-                const payload = {
-                    device_id: state.currentDeviceId,
-                    api_key: 'ce-secret-key-001',
-                    temperature: parseFloat(simTemp),
-                    ph: parseFloat(simPh),
-                    alcohol: simAlcohol,
-                    raw_temp: 14800,
-                    raw_adc: simAlcohol,
-                    rssi: simRssi,
-                    firmware: '1.0.0',
-                    ts: Math.floor(Date.now() / 1000)
-                };
-
-                const res = await fetch('api/telemetry.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const json = await res.json();
-                if (json.status === 'ok') {
-                    showToast(`Simulasi ESP32 terkirim: Suhu ${simTemp}°C, pH ${simPh}`);
-                    fetchLatestData();
-                    fetchHistoryData();
-                } else {
-                    showToast(`Gagal: ${json.message}`, 'error');
-                }
-            } catch (err) {
-                showToast('Error koneksi simulasi', 'error');
-            }
-        });
-    }
-
     // Helper Toast Notification
     function showToast(message, type = 'info') {
         if (!el.toastContainer) return;
+
+        // Hindari toast identik menumpuk ketika tombol diklik berulang.
+        const existing = Array.from(el.toastContainer.querySelectorAll('.glass-toast'));
+        const duplicate = existing.find(item => item.dataset.message === String(message));
+        if (duplicate) {
+            duplicate.style.opacity = '1';
+            return;
+        }
+        // Maksimal tiga notifikasi terlihat bersamaan.
+        while (el.toastContainer.querySelectorAll('.glass-toast').length >= 3) {
+            el.toastContainer.querySelector('.glass-toast')?.remove();
+        }
+
         const toast = document.createElement('div');
         toast.className = 'glass-toast glass';
+        toast.dataset.message = String(message);
         toast.style.borderColor = type === 'error' ? 'var(--pink)' : 'var(--teal)';
         toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
         el.toastContainer.appendChild(toast);
@@ -871,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initChart();
     fetchLatestData();
     fetchHistoryData();
-    fetchAndApplyDeviceFilter();   // Inisialisasi filter status device
+    fetchDeviceMetadata();
 
     // Polling data realtime dari server tiap 3 detik
     state.pollTimer = setInterval(fetchLatestData, state.pollIntervalMs);
@@ -879,8 +892,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh grafik & tabel otomatis tiap 6 detik (fallback jika tidak ada push baru)
     setInterval(fetchHistoryData, 6000);
 
-    // Refresh status filter device setiap 30 detik (update badge jumlah online/offline)
-    setInterval(fetchAndApplyDeviceFilter, 30000);
+    // Refresh metadata device setiap 30 detik (sync timeout offline)
+    setInterval(fetchDeviceMetadata, 30000);
 
     // Ticker hitungan detik update tiap 1 detik
     state.secondsTickerTimer = setInterval(updateRelativeTimeCounter, 1000);
@@ -890,7 +903,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.visibilityState === 'visible') {
             fetchLatestData();
             fetchHistoryData();
-            fetchAndApplyDeviceFilter();
+            fetchDeviceMetadata();
         }
     });
 });

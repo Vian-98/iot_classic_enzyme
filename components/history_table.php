@@ -26,10 +26,17 @@
 
         <div class="btn-group">
             <button id="btnRefresh" class="glass-btn" title="Refresh data sekarang">Refresh</button>
-            <button id="btnSimulate" class="glass-btn" title="Kirim data simulasi lokal">Simulasi Ingest</button>
         </div>
     </div>
 
+    <!-- Mobile Card View List (< 640px) -->
+    <div id="historyCardList" class="table-card-list">
+        <div class="table-card-item" style="text-align:center; color:var(--text-muted); padding:24px;">
+            Memuat data telemetri...
+        </div>
+    </div>
+
+    <!-- Desktop Table View (>= 640px) -->
     <div class="table-responsive">
         <table class="glass-table">
             <thead>

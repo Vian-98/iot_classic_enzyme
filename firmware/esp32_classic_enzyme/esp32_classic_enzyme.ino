@@ -29,21 +29,15 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <esp_system.h>
+#include <time.h>
+#include "secrets.h"
 
 // ==============================================================================
 // 1. KONFIGURASI JARINGAN & SERVER BACKEND
 // ==============================================================================
 
-const char* WIFI_SSID     = "fathur";
-const char* WIFI_PASSWORD = "PASSWORD_WIFI_ANDA"; // <-- Masukkan password WiFi Anda di sini
-
-// IP Laptop / Web Server lokal
-const char* SERVER_URL = "http://192.168.1.3:8899/api/telemetry.php";
-
-// Kredensial Otentikasi Perangkat (harus sesuai dengan tabel 'devices')
-const char* DEVICE_ID = "esp32-ce-001";
-const char* API_KEY   = "ce-secret-key-001";
-const char* FIRMWARE_VERSION = "1.0.0";
+const char* FIRMWARE_VERSION = "2.0.0";
 
 // Interval Pengiriman Data (dalam milidetik: 5000 ms = 5 detik)
 const unsigned long SEND_INTERVAL_MS = 5000;
@@ -86,6 +80,12 @@ const float PH_SLOPE     = 0.18; // Volt per unit pH
 // ==============================================================================
 unsigned long lastSendTime = 0;
 int sendCounter = 0;
+uint32_t telemetrySequence = 0;
+char bootId[33] = {0};
+
+const char* NTP_SERVER_PRIMARY = "pool.ntp.org";
+const char* NTP_SERVER_FALLBACK = "time.google.com";
+const time_t MIN_VALID_EPOCH = 1704067200; // 2024-01-01 UTC
 
 // ==============================================================================
 // 6. HELPER PEMBACAAN SENSOR (DENGAN DETEKSI KABEL LEPAS)
@@ -188,7 +188,12 @@ void setup() {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
 
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
+    (unsigned long)esp_random(), (unsigned long)esp_random(),
+    (unsigned long)esp_random(), (unsigned long)esp_random());
+
   connectWiFi();
+  syncClock();
 }
 
 // ==============================================================================
@@ -218,6 +223,33 @@ void connectWiFi() {
   }
 }
 
+/** Sinkronkan waktu UTC sebelum TLS dan payload anti-replay digunakan. */
+bool syncClock() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  time_t now;
+  time(&now);
+  if (now >= MIN_VALID_EPOCH) return true;
+
+  Serial.println("[NTP] Menyinkronkan waktu...");
+  configTime(0, 0, NTP_SERVER_PRIMARY, NTP_SERVER_FALLBACK);
+  for (int attempt = 0; attempt < 20; attempt++) {
+    delay(500);
+    time(&now);
+    if (now >= MIN_VALID_EPOCH) {
+      Serial.println("[NTP] Waktu tersinkronkan.");
+      return true;
+    }
+  }
+
+  Serial.println("[NTP] Gagal mendapatkan waktu; telemetri HTTPS ditunda.");
+  return false;
+}
+
+bool isProductionHttpsUrl() {
+  return strncmp(SERVER_URL, "https://", 8) == 0;
+}
+
 // ==============================================================================
 // 9. PENGIRIMAN DATA TELEMETRI VIA HTTP POST
 // ==============================================================================
@@ -228,11 +260,33 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
     if (WiFi.status() != WL_CONNECTED) return;
   }
 
+  if (!isProductionHttpsUrl()) {
+    Serial.println("[HTTP] SERVER_URL wajib memakai HTTPS. Pengiriman dibatalkan.");
+    return;
+  }
+
+  if (!syncClock()) return;
+
+  // Batas transport, bukan threshold proses fermentasi. Nilai tidak masuk akal
+  // dikirim sebagai null agar server dapat menandai kualitas data tanpa alarm palsu.
+  if (!isnan(temp) && (temp < 0.0f || temp > 100.0f)) {
+    Serial.println("[SENSOR] Suhu di luar rentang transport (0-100 C).");
+    temp = NAN;
+  }
+  if (!isnan(ph) && (ph < 0.0f || ph > 14.0f)) {
+    Serial.println("[SENSOR] pH di luar rentang transport (0-14).");
+    ph = NAN;
+  }
+  if (alcohol < 0 || alcohol > 4095) {
+    if (alcohol > 4095) Serial.println("[SENSOR] ADC MQ-3 di luar rentang (0-4095).");
+    alcohol = -1;
+  }
+
   digitalWrite(PIN_LED_BUILTIN, HIGH);
 
-  // Gunakan WiFiClientSecure untuk koneksi HTTPS (Cloudflare)
+  // TLS tervalidasi menggunakan CA yang didefinisikan khusus untuk deployment.
   WiFiClientSecure client;
-  client.setInsecure(); // Skip verifikasi sertifikat SSL agar hemat memori di ESP32
+  client.setCACert(TLS_ROOT_CA);
 
   HTTPClient http;
 
@@ -264,12 +318,15 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
     strcpy(alcoholStr, "null");
   }
 
-  // Buat payload JSON
-  char jsonBuffer[384];
+  time_t now;
+  time(&now);
+  const uint32_t sequence = ++telemetrySequence;
+
+  // Payload v2: API key hanya di header, timestamp Unix + boot/sequence mencegah replay.
+  char jsonBuffer[448];
   snprintf(jsonBuffer, sizeof(jsonBuffer),
     "{"
       "\"device_id\":\"%s\","
-      "\"api_key\":\"%s\","
       "\"temperature\":%s,"
       "\"ph\":%s,"
       "\"alcohol\":%s,"
@@ -277,10 +334,12 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
       "\"raw_adc\":%s,"
       "\"rssi\":%d,"
       "\"firmware\":\"%s\","
-      "\"ts\":%lu"
+      "\"protocol_version\":2,"
+      "\"ts\":%lu,"
+      "\"boot_id\":\"%s\","
+      "\"sequence\":%lu"
     "}",
     DEVICE_ID,
-    API_KEY,
     tempStr,
     phStr,
     alcoholStr,
@@ -288,7 +347,9 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
     alcoholStr,
     rssi,
     FIRMWARE_VERSION,
-    (unsigned long)(millis() / 1000)
+    (unsigned long)now,
+    bootId,
+    (unsigned long)sequence
   );
 
   Serial.println("[HTTP] Payload JSON:");

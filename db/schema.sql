@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `devices` (
   `device_name` VARCHAR(100) NOT NULL,
   `location` VARCHAR(100) DEFAULT 'Lab Fermentasi Utama',
   `api_key` VARCHAR(64) NOT NULL,
+  `api_key_hash` VARCHAR(255) NULL DEFAULT NULL COMMENT 'Hash API key untuk autentikasi ingest v2',
   `status` ENUM('online', 'offline') NOT NULL DEFAULT 'offline',
   `last_seen` DATETIME NULL DEFAULT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -43,10 +44,15 @@ CREATE TABLE IF NOT EXISTS `telemetry` (
   `firmware_ver` VARCHAR(20) DEFAULT '1.0.0',
   `device_ts` BIGINT UNSIGNED NULL DEFAULT NULL COMMENT 'Unix timestamp internal ESP32',
   `ip_address` VARCHAR(45) NULL DEFAULT NULL COMMENT 'IP Address pengirim (IPv4/IPv6)',
+  `boot_id` VARCHAR(64) NULL DEFAULT NULL COMMENT 'ID acak setiap boot ESP32 untuk anti-replay',
+  `request_sequence` BIGINT NULL DEFAULT NULL COMMENT 'Nomor request berurutan dalam satu boot',
+  `is_valid` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 bila pembacaan gagal validasi rentang fisik',
+  `validation_flags` TEXT NULL DEFAULT NULL COMMENT 'JSON alasan data invalid',
   `received_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Waktu server menerima data',
   PRIMARY KEY (`id`),
   INDEX `idx_device_time` (`device_id`, `received_at`),
-  INDEX `idx_received_at` (`received_at`)
+  INDEX `idx_received_at` (`received_at`),
+  UNIQUE KEY `uq_telemetry_replay` (`device_id`, `boot_id`, `request_sequence`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
@@ -109,11 +115,33 @@ CREATE TABLE IF NOT EXISTS `settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
+-- 7. TABEL KEAMANAN: pembatasan ingest dan audit tanpa menyimpan secret mentah
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ingest_rate_limits` (
+  `scope` VARCHAR(191) NOT NULL,
+  `window_start` DATETIME NOT NULL,
+  `request_count` INT NOT NULL DEFAULT 0,
+  `blocked_until` DATETIME NULL DEFAULT NULL,
+  PRIMARY KEY (`scope`, `window_start`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `security_events` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `event_type` VARCHAR(64) NOT NULL,
+  `device_id` VARCHAR(64) NULL DEFAULT NULL,
+  `source_ip` VARCHAR(64) NULL DEFAULT NULL,
+  `detail` TEXT NULL DEFAULT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_security_events_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
 -- SEED DATA: Device Perdana, Admin Default, Thresholds, & Settings
 -- ------------------------------------------------------------------------------
 INSERT INTO `devices` (`device_id`, `device_name`, `location`, `api_key`, `status`)
 VALUES 
-  ('esp32-ce-001', 'Bioreaktor Classic Enzyme 01', 'Ruang Fermentasi A', 'ce-secret-key-001', 'offline')
+  ('esp32-ce-001', 'CE Monitoring 1', 'Ruang Fermentasi A', 'GANTI_API_KEY_SEBELUM_PRODUKSI', 'offline')
 ON DUPLICATE KEY UPDATE 
   `device_name` = VALUES(`device_name`),
   `location` = VALUES(`location`);
@@ -137,4 +165,3 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ON DUPLICATE KEY UPDATE `setting_key` = `setting_key`;
 
 SET FOREIGN_KEY_CHECKS = 1;
-

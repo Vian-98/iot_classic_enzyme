@@ -50,7 +50,7 @@ try {
     // 2. Ambil data telemetri terakhir
     $stmtTel = $db->prepare("
         SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
-               rssi, firmware_ver, device_ts, ip_address, received_at
+               rssi, firmware_ver, device_ts, ip_address, received_at, is_valid, validation_flags
         FROM telemetry
         WHERE device_id = ?
         ORDER BY received_at DESC, id DESC
@@ -139,6 +139,8 @@ try {
             'rssi' => $latestTelemetry['rssi'] !== null ? (int)$latestTelemetry['rssi'] : null,
             'firmware_ver' => $latestTelemetry['firmware_ver'],
             'device_ts' => $latestTelemetry['device_ts'],
+            'is_valid' => (bool)$latestTelemetry['is_valid'],
+            'validation_flags' => $latestTelemetry['validation_flags'] ? json_decode($latestTelemetry['validation_flags'], true) : [],
             'ip_address' => isAdminLoggedIn() ? $latestTelemetry['ip_address'] : null,
             'received_at' => $latestTelemetry['received_at']
         ] : null

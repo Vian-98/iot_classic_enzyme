@@ -51,6 +51,7 @@ try {
     </div>
 
     <div id="toastContainer" class="toast-container"></div>
+    <?php include __DIR__ . '/components/bottom_nav.php'; ?>
     <script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>"></script>
 </body>
 </html>

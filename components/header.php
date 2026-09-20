@@ -5,30 +5,36 @@
  */
 ?>
 <header class="navbar-dock glass">
-    <div class="brand-section">
-        <a href="index.php" style="text-decoration:none; display:flex; align-items:center;">
-            <div>
-                <h1 class="brand-title">Classic Enzyme</h1>
-                <div class="brand-subtitle">IoT Fermentation Monitor</div>
-            </div>
-        </a>
-    </div>
-
-    <div class="dock-controls">
-
-        <!-- Filter Status Device (Semua / Online / Offline) -->
-        <div class="device-status-filter" id="deviceStatusFilter" role="group" aria-label="Filter status perangkat">
-            <button class="filter-status-btn active" data-status="all" title="Tampilkan semua perangkat">Semua</button>
-            <button class="filter-status-btn" data-status="online" title="Tampilkan perangkat online saja">
-                <span class="filter-dot online"></span>Online
-            </button>
-            <button class="filter-status-btn" data-status="offline" title="Tampilkan perangkat offline saja">
-                <span class="filter-dot offline"></span>Offline
-            </button>
+    <!-- Row 1: Brand & Theme Toggle (Mobile) / Left & Right aligned (Desktop) -->
+    <div class="navbar-row-1">
+        <div class="brand-section">
+            <a href="index.php" style="text-decoration:none; display:flex; align-items:center;">
+                <div>
+                    <h1 class="brand-title">Classic Enzyme</h1>
+                    <div class="brand-subtitle">IoT Fermentation Monitor</div>
+                </div>
+            </a>
         </div>
 
+        <div class="navbar-row-1-actions">
+            <a href="history.php" class="glass-btn nav-desktop-only">Riwayat</a>
+            <?php if (isAdminLoggedIn()): ?>
+            <a href="admin.php" class="glass-btn nav-desktop-only" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
+            <?php else: ?>
+            <a href="login.php" class="glass-btn nav-desktop-only" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
+            <?php endif; ?>
+            <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema (Gelap/Cerah)">
+                <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;">
+                    <!-- SVG Icon diisi secara dinamis oleh app.js -->
+                </span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Row 2: Device Select + Live Status Pill -->
+    <div class="navbar-row-2">
         <div class="device-select-wrapper">
-            <select id="deviceSelect" class="glass-select" aria-label="Pilih Bioreaktor">
+            <select id="deviceSelect" class="glass-select" aria-label="Pilih Perangkat">
                 <?php if (!empty($devices)): ?>
                     <?php foreach ($devices as $d): ?>
                         <option value="<?= htmlspecialchars($d['device_id']) ?>">
@@ -36,7 +42,7 @@
                         </option>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <option value="esp32-ce-001">Bioreaktor 01</option>
+                    <option value="esp32-ce-001">CE Monitoring 1</option>
                 <?php endif; ?>
             </select>
         </div>
@@ -48,17 +54,5 @@
             </div>
             <span class="status-last-seen" id="statusLastSeen">--</span>
         </div>
-
-        <a href="history.php" class="glass-btn">Riwayat</a>
-        <?php if (isAdminLoggedIn()): ?>
-        <a href="admin.php" class="glass-btn" style="color:var(--teal); border-color:var(--teal-border);">Admin</a>
-        <?php else: ?>
-        <a href="login.php" class="glass-btn" style="color:var(--text-muted); font-size:0.75rem;">Admin</a>
-        <?php endif; ?>
-        <button id="themeToggleBtn" class="glass-btn glass-btn-icon" aria-label="Toggle Theme" title="Beralih Tema (Gelap/Cerah)">
-            <span id="themeIcon" style="display:inline-flex; align-items:center; justify-content:center;">
-                <!-- SVG Icon diisi secara dinamis oleh app.js -->
-            </span>
-        </button>
     </div>
 </header>

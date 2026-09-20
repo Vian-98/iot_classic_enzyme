@@ -26,6 +26,7 @@ php_errors.log
 .env
 *.env.local
 config/secrets.php
+firmware/esp32_classic_enzyme/secrets.h
 
 # Node (if ever added)
 node_modules/

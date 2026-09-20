@@ -10,7 +10,7 @@
     <div class="glass glass-interactive sensor-card card-temp">
         <div class="sensor-header">
             <div class="sensor-meta">
-                <span class="sensor-title">Suhu Bioreaktor</span>
+                <span class="sensor-title">Suhu Fermentasi</span>
                 <span class="sensor-hardware">MAX6675 · Termokopel K</span>
             </div>
             <span class="sensor-badge badge-pink" id="badgeTemp">SUHU</span>
@@ -58,8 +58,8 @@
             <span class="sensor-unit">ADC</span>
         </div>
         <div class="sensor-footer">
-            <span>Zona Fiqih / Halal</span>
-            <span class="range-pill" id="footerAlcohol">Batas: ≤ 800 ADC</span>
+            <span>Ambang Batas</span>
+            <span class="range-pill" id="footerAlcohol">≤ 800 ADC</span>
         </div>
     </div>
 

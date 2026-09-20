@@ -798,29 +798,29 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function applyTableFilter(filterVal) {
         state.tableFilter = filterVal;
-        if (!el.historyTableBody) return;
-        const dataRows = el.historyTableBody.querySelectorAll('.data-row');
-        const offlineRows = el.historyTableBody.querySelectorAll('.downtime-row');
-        const emptyRows = el.historyTableBody.querySelectorAll('.empty-filter-row');
-        emptyRows.forEach(r => r.remove());
+        const containers = [el.historyTableBody, el.historyCardList].filter(Boolean);
+        if (containers.length === 0) return;
 
-        dataRows.forEach(r => {
-            r.style.display = (filterVal === 'offline') ? 'none' : '';
-        });
-        offlineRows.forEach(r => {
-            r.style.display = (filterVal === 'valid') ? 'none' : '';
-        });
+        containers.forEach(container => {
+            const dataRows = container.querySelectorAll('.data-row');
+            const offlineRows = container.querySelectorAll('.downtime-row');
+            const emptyRows = container.querySelectorAll('.empty-filter-row');
+            emptyRows.forEach(r => r.remove());
 
-        if (filterVal === 'offline' && offlineRows.length === 0) {
-            el.historyTableBody.insertAdjacentHTML('beforeend', `
-                <tr class="empty-filter-row">
-                    <td colspan="6" style="text-align:center; color:var(--teal-text); padding:18px; font-size:0.8rem;">
-                        <span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>
-                        Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime
-                    </td>
-                </tr>
-            `);
-        }
+            dataRows.forEach(r => {
+                r.style.display = (filterVal === 'offline') ? 'none' : '';
+            });
+            offlineRows.forEach(r => {
+                r.style.display = (filterVal === 'valid') ? 'none' : '';
+            });
+
+            if (filterVal === 'offline' && offlineRows.length === 0) {
+                const emptyMarkup = container === el.historyTableBody
+                    ? `<tr class="empty-filter-row"><td colspan="6" style="text-align:center; color:var(--teal-text); padding:18px; font-size:0.8rem;"><span class="filter-dot online" style="display:inline-block; vertical-align:middle; margin-right:6px;"></span>Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime</td></tr>`
+                    : `<div class="table-card-item empty-filter-row" style="text-align:center; color:var(--teal-text); padding:18px;">Tidak ada periode offline — transmisi sensor berlangsung stabil tanpa jeda downtime</div>`;
+                container.insertAdjacentHTML('beforeend', emptyMarkup);
+            }
+        });
     }
 
     // Event listener tombol filter baris tabel realtime (Semua / Valid (Ada Data) / Offline)

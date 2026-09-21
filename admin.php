@@ -340,6 +340,40 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
             font-weight: 700;
         }
 
+        /* Threshold panel: compact grouping so the controls stay scannable. */
+        .threshold-panel .form-section { padding: 18px 20px; }
+        .threshold-panel .threshold-intro { margin: 0 0 14px; font-size: 0.75rem; line-height: 1.4; }
+        .threshold-panel .timeout-card {
+            display: flex; align-items: center; justify-content: space-between; gap: 16px;
+            padding: 12px 14px; margin-bottom: 18px; background: var(--glass-bg);
+            border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+        }
+        .threshold-panel .timeout-copy { min-width: 0; }
+        .threshold-panel .timeout-copy strong { display: block; font-size: 0.78rem; color: var(--teal-text); }
+        .threshold-panel .timeout-copy span { display: block; margin-top: 3px; font-size: 0.68rem; color: var(--text-muted); }
+        .threshold-panel .timeout-form { display: flex; align-items: end; gap: 8px; flex-shrink: 0; }
+        .threshold-panel .timeout-form .form-input { width: 112px; height: 38px; }
+        .threshold-panel .timeout-form .form-hint { display: none; }
+        .threshold-panel .sensor-threshold {
+            padding: 12px 0 14px 12px; margin-bottom: 10px;
+            border-left: 3px solid var(--teal); border-bottom: 1px solid var(--glass-border);
+        }
+        .threshold-panel .sensor-threshold:last-of-type { border-bottom: 0; }
+        .threshold-panel .sensor-threshold-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .threshold-panel .sensor-threshold-title { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+        .threshold-panel .sensor-threshold-current { font-size: 0.68rem; color: var(--text-muted); text-align: right; }
+        .threshold-panel .sensor-threshold .form-row { gap: 10px; margin-bottom: 0; }
+        .threshold-panel .sensor-threshold .form-hint { display: none; }
+        .threshold-panel .threshold-submit { display: flex; justify-content: flex-end; margin-top: 6px; }
+        @media (max-width: 600px) {
+            .threshold-panel .timeout-card { align-items: stretch; flex-direction: column; gap: 10px; }
+            .threshold-panel .timeout-form { width: 100%; }
+            .threshold-panel .timeout-form .form-group { flex: 1; }
+            .threshold-panel .timeout-form .form-input { width: 100%; }
+            .threshold-panel .sensor-threshold-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+            .threshold-panel .sensor-threshold-current { text-align: left; }
+        }
+
         /* ---- Severity badge ---- */
         .sev-critical { background: var(--pink-soft); color: var(--pink-text); border: 1px solid var(--pink-border); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
         .sev-warning  { background: rgba(251,191,36,0.15); color: #b45309; border: 1px solid rgba(251,191,36,0.3); border-radius: 9999px; padding: 2px 8px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
@@ -438,24 +472,24 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         <!-- ================================================================
              TAB 1: THRESHOLD ALARM
         ================================================================ -->
-        <section class="glass admin-panel active" id="tab-threshold">
+        <section class="glass admin-panel active threshold-panel" id="tab-threshold">
             <div class="form-section">
                 <div class="section-hdr">
                     <div class="section-title">Batas Threshold Sensor</div>
                     <div style="font-size:0.72rem; color:var(--text-muted);">Device: esp32-ce-001</div>
                 </div>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:20px; line-height:1.5;">
-                    Atur <strong>Rentang Batas Ideal (Threshold)</strong> untuk fermentasi. Rentang ini otomatis tampil di kartu Dashboard Utama dan menjadi acuan alarm otomatis jika nilai sensor melewati batas Min atau Max.
+                <p class="threshold-intro" style="color:var(--text-muted);">
+                    Tentukan rentang ideal sensor. Nilai ini dipakai Dashboard dan alarm otomatis.
                 </p>
 
-                <div style="border:1px solid var(--glass-border); border-radius:14px; padding:16px; margin-bottom:24px; background:var(--glass-bg);">
-                    <div style="font-size:0.82rem; font-weight:700; color:var(--teal-text); margin-bottom:6px;">Timeout Status Device</div>
-                    <p style="font-size:0.74rem; color:var(--text-muted); line-height:1.5; margin:0 0 12px;">
-                        Device dianggap <strong>OFFLINE</strong> jika tidak ada telemetry selama lebih dari batas ini. Pengaturan ini dipakai bersama oleh Dashboard, Admin, API status, tabel realtime, riwayat, dan notifikasi.
-                    </p>
-                    <form method="POST" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+                <div class="timeout-card">
+                    <div class="timeout-copy">
+                        <strong>Timeout status device</strong>
+                        <span>Device offline jika tidak ada telemetry melewati batas ini.</span>
+                    </div>
+                    <form method="POST" class="timeout-form">
                         <input type="hidden" name="_action" value="update_settings">
-                        <div class="form-group" style="margin:0; min-width:220px;">
+                        <div class="form-group" style="margin:0;">
                             <label class="form-label" for="offline_timeout_seconds">Batas offline (detik)</label>
                             <input id="offline_timeout_seconds" type="number" name="offline_timeout_seconds" class="form-input" min="30" max="86400" step="1" required value="<?= htmlspecialchars((string)$offlineTimeout) ?>">
                             <div class="form-hint">Contoh: 300 = 5 menit, 900 = 15 menit.</div>
@@ -464,26 +498,26 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     </form>
                 </div>
 
-                <form method="POST">
+                <form method="POST" class="threshold-form">
                     <input type="hidden" name="_action" value="save_threshold">
                     <input type="hidden" name="device_id" value="esp32-ce-001">
 
                     <!-- Suhu -->
-                    <div style="border-left: 3px solid var(--pink); padding-left: 14px; margin-bottom: 20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--pink-text); text-transform:uppercase; letter-spacing:0.04em;">Suhu Fermentasi (MAX6675)</div>
-                            <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= ($thresholds['temp']['val_min'] ?? '20') . ' – ' . ($thresholds['temp']['val_max'] ?? '40') ?> °C</strong></span>
+                    <div class="sensor-threshold" style="border-left-color:var(--pink);">
+                        <div class="sensor-threshold-head">
+                            <div class="sensor-threshold-title" style="color:var(--pink-text);">Suhu Fermentasi</div>
+                            <span class="sensor-threshold-current">Dashboard: <strong><?= ($thresholds['temp']['val_min'] ?? '20') . ' – ' . ($thresholds['temp']['val_max'] ?? '40') ?> °C</strong></span>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Batas Bawah Ideal / Min (°C)</label>
+                                <label class="form-label">Min (°C)</label>
                                 <input type="number" step="0.1" name="min_temp" class="form-input"
                                     value="<?= $thresholds['temp']['val_min'] ?? '' ?>"
                                     placeholder="Cth: 30.0">
                                 <div class="form-hint">Di bawah batas ini → Alarm Suhu Rendah</div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Batas Atas Ideal / Max (°C)</label>
+                                <label class="form-label">Max (°C)</label>
                                 <input type="number" step="0.1" name="max_temp" class="form-input"
                                     value="<?= $thresholds['temp']['val_max'] ?? '' ?>"
                                     placeholder="Cth: 38.0">
@@ -493,21 +527,21 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     </div>
 
                     <!-- pH -->
-                    <div style="border-left: 3px solid var(--teal); padding-left: 14px; margin-bottom: 20px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--teal-text); text-transform:uppercase; letter-spacing:0.04em;">Keasaman pH (PH-110)</div>
-                            <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= ($thresholds['ph']['val_min'] ?? '3.0') . ' – ' . ($thresholds['ph']['val_max'] ?? '4.5') ?> pH</strong></span>
+                    <div class="sensor-threshold">
+                        <div class="sensor-threshold-head">
+                            <div class="sensor-threshold-title" style="color:var(--teal-text);">Keasaman pH</div>
+                            <span class="sensor-threshold-current">Dashboard: <strong><?= ($thresholds['ph']['val_min'] ?? '3.0') . ' – ' . ($thresholds['ph']['val_max'] ?? '4.5') ?> pH</strong></span>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Batas Bawah Ideal / Min pH</label>
+                                <label class="form-label">Min pH</label>
                                 <input type="number" step="0.1" name="min_ph" class="form-input"
                                     value="<?= $thresholds['ph']['val_min'] ?? '' ?>"
                                     placeholder="Cth: 3.2">
                                 <div class="form-hint">Di bawah batas ini → Alarm Terlalu Asam</div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Batas Atas Ideal / Max pH</label>
+                                <label class="form-label">Max pH</label>
                                 <input type="number" step="0.1" name="max_ph" class="form-input"
                                     value="<?= $thresholds['ph']['val_max'] ?? '' ?>"
                                     placeholder="Cth: 4.5">
@@ -517,9 +551,9 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     </div>
 
                     <!-- Alkohol -->
-                    <div style="border-left: 3px solid var(--violet); padding-left: 14px; margin-bottom: 24px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <div style="font-size:0.82rem; font-weight:700; color:var(--violet-text); text-transform:uppercase; letter-spacing:0.04em;">Uap Gas Alkohol (MQ-3 ADC)</div>
+                    <div class="sensor-threshold" style="border-left-color:var(--violet);">
+                        <div class="sensor-threshold-head">
+                            <div class="sensor-threshold-title" style="color:var(--violet-text);">Uap Gas Alkohol</div>
                             <?php
                                 $hasAlcMin = isset($thresholds['alcohol']['val_min']) && $thresholds['alcohol']['val_min'] !== null && $thresholds['alcohol']['val_min'] !== '';
                                 $hasAlcMax = isset($thresholds['alcohol']['val_max']) && $thresholds['alcohol']['val_max'] !== null && $thresholds['alcohol']['val_max'] !== '';
@@ -533,18 +567,18 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                     $dashAlc = '≤ 800 ADC (Default)';
                                 }
                             ?>
-                            <span style="font-size:0.75rem; color:var(--text-muted);">Tampil di Dashboard: <strong><?= htmlspecialchars($dashAlc) ?></strong></span>
+                            <span class="sensor-threshold-current">Dashboard: <strong><?= htmlspecialchars($dashAlc) ?></strong></span>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Batas Bawah Ideal / Min ADC</label>
+                                <label class="form-label">Min ADC <span style="font-weight:400; text-transform:none;">(opsional)</span></label>
                                 <input type="number" step="1" name="min_alcohol" class="form-input"
                                     value="<?= $thresholds['alcohol']['val_min'] ?? '' ?>"
                                     placeholder="Kosongkan jika tidak ada batas bawah">
                                 <div class="form-hint">Opsional (umumnya kosong untuk gas fermentasi)</div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Batas Atas Ideal / Max ADC</label>
+                                <label class="form-label">Max ADC</label>
                                 <input type="number" step="1" name="max_alcohol" class="form-input"
                                     value="<?= $thresholds['alcohol']['val_max'] ?? '' ?>"
                                     placeholder="Cth: 500">
@@ -553,7 +587,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                         </div>
                     </div>
 
-                    <button type="submit" class="btn-primary">Simpan Rentang Ideal</button>
+                    <div class="threshold-submit"><button type="submit" class="btn-primary">Simpan Threshold</button></div>
                 </form>
             </div>
         </section>

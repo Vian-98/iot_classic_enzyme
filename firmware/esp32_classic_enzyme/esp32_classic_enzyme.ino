@@ -49,7 +49,7 @@ const unsigned long SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
 // ==============================================================================
 const bool SENSOR_SUHU_TERPASANG    = true;   // MAX6675 (Sudah dipasang)
 const bool SENSOR_PH_TERPASANG      = false;  // PH-110 (Belum dipasang -> kirim null)
-const bool SENSOR_ALKOHOL_TERPASANG = false;  // MQ-3 (Belum dipasang -> kirim null)
+const bool SENSOR_ALKOHOL_TERPASANG = true;  // MQ-3 (Belum dipasang -> kirim null)
 
 // ==============================================================================
 // 3. PIN DEFINITIONS

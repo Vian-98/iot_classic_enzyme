@@ -14,6 +14,8 @@
  */
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, OPTIONS');
 
@@ -26,7 +28,7 @@ require_once __DIR__ . '/../config/database.php';
 
 $deviceId = trim($_GET['device_id'] ?? 'esp32-ce-001');
 $range    = trim($_GET['range'] ?? '1h');
-$limit    = min(1000, max(10, (int)($_GET['limit'] ?? 60)));
+$limit    = min(10000, max(10, (int)($_GET['limit'] ?? 60)));
 $order    = strtolower(trim($_GET['order'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
 $startDate = trim($_GET['start_date'] ?? '');
 $endDate = trim($_GET['end_date'] ?? '');

@@ -508,7 +508,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchHistoryData() {
         if (document.visibilityState !== 'visible') return;
         try {
-            const res = await fetch(`api/history.php?device_id=${encodeURIComponent(state.currentDeviceId)}&range=${state.chartRange}&limit=40`);
+            // Ambil seluruh titik yang relevan untuk preset aktif. Batas 40 membuat
+            // preset "Semua" terlihat seperti tidak berubah karena hanya 40 data
+            // terbaru yang dikirim ke grafik.
+            const historyLimit = 10000;
+            const res = await fetch(`api/history.php?device_id=${encodeURIComponent(state.currentDeviceId)}&range=${encodeURIComponent(state.chartRange)}&limit=${historyLimit}`, {
+                cache: 'no-store',
+                headers: { 'Accept': 'application/json' }
+            });
             const json = await res.json().catch(() => ({}));
 
             if (!res.ok || json.status !== 'ok') {

@@ -15,14 +15,14 @@ $page     = max(1, (int)($_GET['page'] ?? 1));
 $startDate = trim($_GET['start_date'] ?? '');
 $endDate = trim($_GET['end_date'] ?? '');
 $status = strtolower(trim($_GET['status'] ?? 'all'));
-$preset = strtolower(trim($_GET['preset'] ?? 'custom'));
+$preset = strtolower(trim($_GET['preset'] ?? 'today'));
 $action   = $_GET['action'] ?? '';
 
 if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) $startDate = '';
 if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) $endDate = '';
 if (!in_array($status, ['all', 'valid', 'invalid'], true)) $status = 'all';
 $validPresets = ['today', '7d', 'this_month', 'last_month', 'all', 'custom'];
-if (!in_array($preset, $validPresets, true)) $preset = 'custom';
+if (!in_array($preset, $validPresets, true)) $preset = 'today';
 
 $appToday = new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta'));
 if ($preset === 'today') {
@@ -352,7 +352,7 @@ $stats = [
                         </div>
                     </div>
                     <div class="history-filter-actions">
-                        <a class="glass-btn" href="history.php?device_id=<?= urlencode($deviceId) ?>&preset=all&range=all&limit=<?= $limit ?>">Reset</a>
+                        <a class="glass-btn" href="history.php?device_id=<?= urlencode($deviceId) ?>&preset=today&range=all&limit=<?= $limit ?>">Reset ke hari ini</a>
                         <button type="submit" class="glass-btn" style="background: var(--teal); color: #000; font-weight: 700;">Terapkan filter</button>
                     </div>
                 </div>

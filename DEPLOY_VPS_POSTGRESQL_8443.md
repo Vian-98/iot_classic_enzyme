@@ -103,12 +103,12 @@ sudo nano /etc/apache2/sites-available/classic-enzyme-8443.conf
     SSLCertificateFile /etc/ssl/classic-enzyme/classic-enzyme-server.crt
     SSLCertificateKeyFile /etc/ssl/classic-enzyme/classic-enzyme-server.key
 
-    SetEnv DB_DRIVER pgsql
     SetEnv DB_HOST 127.0.0.1
     SetEnv DB_PORT 5432
     SetEnv DB_NAME classic_enzyme_iot
     SetEnv DB_USER classic_enzyme
     SetEnv DB_PASS PASSWORD_DATABASE_KUAT
+    SetEnv DB_AUTO_INIT_SCHEMA true
 
     ErrorLog ${APACHE_LOG_DIR}/classic-enzyme-error.log
     CustomLog ${APACHE_LOG_DIR}/classic-enzyme-access.log combined
@@ -116,6 +116,8 @@ sudo nano /etc/apache2/sites-available/classic-enzyme-8443.conf
 ```
 
 Ganti `ServerName 123.123.123.123` dan `SetEnv DB_PASS PASSWORD_DATABASE_KUAT` dengan nilai nyata. Placeholder yang tertinggal menyebabkan koneksi database gagal.
+
+`DB_AUTO_INIT_SCHEMA=true` dipakai hanya saat inisialisasi pertama. Setelah tabel dan indeks berhasil dibuat, ubah menjadi `false` agar request produksi tidak menjalankan DDL berulang. Runtime selalu PostgreSQL dan tidak memiliki fallback database.
 
 ## 5. Buat sertifikat HTTPS untuk IP publik VPS
 
@@ -235,7 +237,7 @@ Buka TCP `8443` juga pada Security Group/cloud firewall provider VPS.
 
 Buka `https://IP_VPS:8443/` sekali. Aplikasi membuat schema PostgreSQL otomatis ketika koneksi PHP ke PostgreSQL berhasil.
 
-Pastikan VirtualHost yang aktif memakai `DB_DRIVER=pgsql` dan kredensial yang benar. Jika aplikasi gagal tersambung, cek log:
+Pastikan VirtualHost yang aktif memakai kredensial PostgreSQL yang benar. Jika aplikasi gagal tersambung, cek log:
 
 ```bash
 sudo tail -n 100 /var/log/apache2/classic-enzyme-error.log
@@ -277,7 +279,6 @@ Jika tabel belum muncul, uji koneksi dan inisialisasi schema langsung sebagai us
 
 ```bash
 sudo -u www-data env \
-DB_DRIVER=pgsql \
 DB_HOST=127.0.0.1 \
 DB_PORT=5432 \
 DB_NAME=classic_enzyme_iot \
@@ -286,7 +287,20 @@ DB_PASS='PASSWORD_DATABASE_ASLI' \
 php -r 'require "/var/www/iot/config/database.php"; $db=getDB(); echo $db->getAttribute(PDO::ATTR_DRIVER_NAME), PHP_EOL;'
 ```
 
-Output yang benar adalah `pgsql`. Fungsi `getDB()` juga membuat schema PostgreSQL otomatis. Jika output `sqlite`, password atau permission PostgreSQL masih salah.
+Output yang benar adalah `pgsql`. Fungsi `getDB()` juga membuat schema PostgreSQL otomatis. Jika perintah gagal, password atau permission PostgreSQL masih salah.
+
+Setelah schema, indeks, dan endpoint sudah teruji, ubah pada VirtualHost:
+
+```apache
+SetEnv DB_AUTO_INIT_SCHEMA false
+```
+
+Kemudian reload Apache:
+
+```bash
+sudo apachectl configtest
+sudo systemctl reload apache2
+```
 
 ## 7. Buat API key device
 
@@ -398,4 +412,4 @@ sudo systemctl status postgresql
 
 ## Data lama dari MySQL
 
-Jangan hapus MySQL sebelum PostgreSQL stabil. Script `scripts/migrate_to_pgsql.php` hanya mendukung SQLite → PostgreSQL. Migrasi MySQL → PostgreSQL memerlukan `pgloader` atau proses konversi khusus.
+Runtime aplikasi ini PostgreSQL-only. Migrasi data dari MySQL lama harus dilakukan sebagai proses ETL/`pgloader` terpisah setelah backup dan validasi mapping tabel; aplikasi tidak lagi menyediakan koneksi atau fallback MySQL.

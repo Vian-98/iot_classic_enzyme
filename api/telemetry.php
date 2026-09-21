@@ -204,10 +204,10 @@ function consumeRateLimit(PDO $db, string $scope, int $maxRequests): array {
     $blockedUntil = $existing->fetchColumn();
     if ($blockedUntil) return ['allowed' => false, 'retry_after' => max(1, strtotime($blockedUntil) - time())];
 
-    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-    $sql = $driver === 'mysql'
-        ? 'INSERT INTO ingest_rate_limits (scope, window_start, request_count) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE request_count = request_count + 1'
-        : 'INSERT INTO ingest_rate_limits (scope, window_start, request_count) VALUES (?, ?, 1) ON CONFLICT(scope, window_start) DO UPDATE SET request_count = ingest_rate_limits.request_count + 1';
+    $sql = 'INSERT INTO ingest_rate_limits (scope, window_start, request_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(scope, window_start)
+            DO UPDATE SET request_count = ingest_rate_limits.request_count + 1';
     $stmt = $db->prepare($sql);
     $stmt->execute([$scope, $window]);
     $countStmt = $db->prepare('SELECT request_count FROM ingest_rate_limits WHERE scope = ? AND window_start = ?');

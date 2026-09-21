@@ -13,8 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
         chartRange: '1h',
         lastSeenTimestamp: null,
         lastTelemetryId: null,      // Pelacak ID terakhir untuk auto-sync instan
+        connectionState: null,      // null saat awal, lalu boolean online/offline
         pollIntervalMs: 3000,       // Polling cepat & responsif (3 detik)
-        realtimeStaleAfterSeconds: 300, // 5 menit – sesuai interval kirim sensor
         offlineTimeout: 300,        // Default 5 menit (disinkronkan dari database)
         deviceMap: {},              // { device_id: { is_online, device_name } }
         tableFilter: 'all',         // 'all' | 'valid' | 'offline'
@@ -260,12 +260,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // --------------------------------------------------------------------------
     // 4. TICKER HITUNGAN DETIK RELATIF ("TERAKHIR DITERIMA: X DETIK LALU")
     // --------------------------------------------------------------------------
+    function announceConnectionState(isOnline) {
+        const nextState = Boolean(isOnline);
+        if (state.connectionState === null) {
+            state.connectionState = nextState;
+            return;
+        }
+        if (state.connectionState !== nextState) {
+            state.connectionState = nextState;
+            showToast(nextState ? 'Device kembali ONLINE' : 'Device terdeteksi OFFLINE', nextState ? 'success' : 'error');
+        }
+    }
+
     function updateRelativeTimeCounter() {
-        if (!state.lastSeenTimestamp || !el.statusLastSeen) return;
+        if (!state.lastSeenTimestamp) {
+            announceConnectionState(false);
+            return;
+        }
 
         const now = Math.floor(Date.now() / 1000);
         const diff = Math.max(0, now - state.lastSeenTimestamp);
         const timeout = state.offlineTimeout || 300;
+        const isOnline = diff <= timeout;
+        announceConnectionState(isOnline);
 
         // Format durasi waktu ringkas
         function formatDiff(secs) {
@@ -278,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Jika melebihi batas toleransi offline
-        if (diff > timeout) {
+        if (!isOnline) {
             el.statusLastSeen.textContent = `Terakhir: ${formatDiff(diff)}`;
             if (el.statusPill) {
                 el.statusPill.classList.remove('online');
@@ -345,7 +362,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchLatestData() {
         if (document.visibilityState !== 'visible') return;
         try {
-            const res = await fetch(`api/latest.php?device_id=${encodeURIComponent(state.currentDeviceId)}`);
+            const res = await fetch(`api/latest.php?device_id=${encodeURIComponent(state.currentDeviceId)}`, {
+                cache: 'no-store',
+                headers: { 'Accept': 'application/json' }
+            });
             const json = await res.json();
 
             if (json.status === 'ok' && json.device) {
@@ -363,6 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateRelativeTimeCounter();
                 } else {
                     state.lastSeenTimestamp = null;
+                    announceConnectionState(false);
                     if (el.statusPill) {
                         el.statusPill.classList.remove('online');
                         el.statusPill.classList.add('offline');
@@ -385,12 +406,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update Metric Display & Dynamic Ideal Ranges
                 const th = json.thresholds || {};
 
-                // `offline_timeout` adalah status konektivitas umum (default 5 menit),
-                // sedangkan dashboard memakai jendela realtime 5 menit (sesuai interval sensor).
+                // Semua tampilan memakai timeout yang sama dari pengaturan server.
                 const secondsSinceTelemetry = Number(dev.seconds_ago);
                 const isRealtime = Boolean(tel && dev.is_online && tel.is_valid !== false &&
                     Number.isFinite(secondsSinceTelemetry) &&
-                    secondsSinceTelemetry <= state.realtimeStaleAfterSeconds);
+                    secondsSinceTelemetry <= state.offlineTimeout);
+                announceConnectionState(Boolean(dev.is_online));
 
                 if (!isRealtime && dev.is_online && el.statusText) {
                     el.statusText.textContent = 'ONLINE · DATA STALE';

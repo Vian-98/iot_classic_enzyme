@@ -12,7 +12,7 @@ Proyek ini sengaja tidak memakai MQTT, Node.js, Composer, atau proses background
 flowchart LR
     S[Sensor: MAX6675, pH, MQ-3] --> E[ESP32]
     E -->|HTTP POST JSON setiap 5 detik| T[api/telemetry.php]
-    T -->|verifikasi, simpan telemetry, last_seen, alarm| D[(PostgreSQL / MySQL / SQLite)]
+    T -->|verifikasi, simpan telemetry, last_seen, alarm| D[(PostgreSQL)]
     B[Browser dashboard] -->|GET polling| L[latest.php]
     B -->|GET histori| H[history.php]
     L --> D
@@ -51,12 +51,10 @@ IOT/
 │   ├── history.php                    # GET data grafik dan statistik
 │   └── devices.php                    # GET daftar device serta status hitung
 ├── config/
-│   ├── database.php                   # PDO, fallback database, schema PG/SQLite
+│   ├── database.php                   # PDO PostgreSQL, schema, indeks, settings
 │   └── auth.php                       # Session dan proteksi admin
-├── db/schema.sql                      # Schema dan seed MySQL
 ├── firmware/esp32_classic_enzyme/
 │   └── esp32_classic_enzyme.ino       # Firmware ESP32
-├── scripts/migrate_to_pgsql.php       # Migrasi SQLite → PostgreSQL (konfigurasi lokal)
 ├── components/                        # Partial UI dashboard
 ├── assets/css/style.css               # Desain responsif Liquid Glass
 ├── assets/js/app.js                   # Polling, Chart.js, tema, simulasi
@@ -65,11 +63,7 @@ IOT/
 
 ## Penyimpanan data
 
-`config/database.php` memilih driver dari environment `DB_DRIVER`; nilai bawaan adalah `pgsql`. Urutan koneksi aktualnya:
-
-1. PostgreSQL jika `DB_DRIVER=pgsql`; schema PostgreSQL dibuat otomatis bila koneksi berhasil.
-2. MySQL jika `DB_DRIVER=mysql`, atau sebagai fallback setelah PostgreSQL gagal.
-3. SQLite di `db/iot.sqlite` jika koneksi di atas tidak tersedia. Schema SQLite dibuat otomatis hanya ketika file database baru dibuat.
+`config/database.php` hanya menggunakan PostgreSQL. Schema dan indeks dapat dibuat sekali saat bootstrap dengan `DB_AUTO_INIT_SCHEMA=true`; setelah produksi stabil, ubah ke `false` agar request web tidak menjalankan DDL berulang. Koneksi PostgreSQL gagal akan menghasilkan error, bukan fallback ke database lain.
 
 | Tabel | Isi |
 |---|---|
@@ -80,25 +74,27 @@ IOT/
 | `admins` | username dan hash password |
 | `settings` | konfigurasi global, saat ini `offline_timeout_seconds` |
 
-Schema MySQL tersedia pada `db/schema.sql`; PostgreSQL dan SQLite diinisialisasi oleh fungsi dalam `config/database.php`. Default seed adalah device `esp32-ce-001` dengan placeholder API key yang **wajib diganti sebelum dipakai**, threshold suhu `20–40 °C`, pH `3.0–4.5`, alkohol maksimum `800` ADC, dan timeout offline `300` detik.
+Schema PostgreSQL dan seed diinisialisasi oleh fungsi dalam `config/database.php`. Default seed adalah device `esp32-ce-001` dengan placeholder API key yang **wajib diganti sebelum dipakai**, threshold suhu `20–40 °C`, pH `3.0–4.5`, alkohol maksimum `800` ADC, dan timeout offline `300` detik.
 
 ## Prasyarat
 
-- PHP 8.x dengan ekstensi PDO dan minimal salah satu driver `pdo_pgsql`, `pdo_mysql`, atau `pdo_sqlite`.
-- PostgreSQL, MySQL/MariaDB, atau hak tulis ke direktori `db/` bila memakai SQLite.
+- PHP 8.x dengan ekstensi `pdo_pgsql`.
+- PostgreSQL 14+ dan user database yang memiliki schema `public`.
 - Browser dengan JavaScript aktif dan akses internet ke CDN Chart.js (`cdn.jsdelivr.net`) untuk grafik.
 - Arduino IDE dengan board ESP32 serta library bawaan `WiFi`, `HTTPClient`, dan `WiFiClientSecure` untuk firmware.
 
 ## Menjalankan lokal
 
-Untuk mode paling ringan, paksa SQLite agar hasil tidak bergantung pada database PostgreSQL/MySQL lokal:
+Gunakan PostgreSQL lokal atau container PostgreSQL. Contoh setelah database dan user dibuat:
 
 ```bash
 cd "/Users/favian/Proyek /Classic Enzyme/IOT"
-DB_DRIVER=sqlite php -S 127.0.0.1:8899
+DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=classic_enzyme_iot \
+DB_USER=classic_enzyme DB_PASS='PASSWORD_DATABASE' \
+DB_AUTO_INIT_SCHEMA=true php -S 127.0.0.1:8899
 ```
 
-Buka <http://127.0.0.1:8899>. File SQLite akan dibuat otomatis bila belum ada. Untuk mencoba ingest tanpa hardware, gunakan tombol simulasi pada dashboard (khusus seed device; API key-nya tertanam untuk pengembangan) atau:
+Buka <http://127.0.0.1:8899>. Schema PostgreSQL dibuat otomatis saat bootstrap pertama. Untuk mencoba ingest tanpa hardware, gunakan API key device yang sudah diprovision atau:
 
 ```bash
 NOW=$(date +%s)
@@ -115,15 +111,15 @@ curl -X POST http://127.0.0.1:8899/api/telemetry.php \
 Gunakan environment variables, bukan mengedit kredensial ke dalam kode:
 
 ```bash
-DB_DRIVER=pgsql          # pgsql, mysql, atau sqlite
 DB_HOST=127.0.0.1
 DB_PORT=5432
 DB_NAME=classic_enzyme_iot
 DB_USER=nama_user
 DB_PASS=password_rahasia
+DB_AUTO_INIT_SCHEMA=false
 ```
 
-Untuk MySQL produksi, buat database lalu impor `db/schema.sql`; setelah itu jalankan aplikasi dengan `DB_DRIVER=mysql` dan kredensialnya. Untuk PostgreSQL, buat database kosong dan gunakan `DB_DRIVER=pgsql`; aplikasi akan membuat schema saat koneksi pertama berhasil. SQLite cocok untuk pengembangan atau deployment kecil, tetapi direktori `db/` harus dapat ditulis oleh proses PHP.
+Untuk produksi, buat database PostgreSQL kosong, bootstrap dengan `DB_AUTO_INIT_SCHEMA=true`, uji seluruh endpoint, lalu ubah ke `false`. Jangan mengaktifkan fallback database.
 
 Letakkan isi folder `IOT` sebagai document root/subdomain. Konfigurasi `.htaccess` memblokir akses browser ke `config/`, `db/`, dan sejumlah ekstensi sensitif pada Apache. Pada Nginx, aturan setara harus dibuat di konfigurasi server; `.htaccess` tidak dibaca Nginx.
 
@@ -177,7 +173,7 @@ Endpoint mengizinkan `POST` dan preflight `OPTIONS`; respons sukses berisi `stat
 |---|---|---|
 | `POST /api/telemetry.php` | device + API key | ingest satu pembacaan |
 | `GET /api/latest.php?device_id=…` | publik | nilai terakhir, threshold, status online, jumlah alarm aktif |
-| `GET /api/history.php?device_id=…&range=1h&limit=60&order=asc` | publik | histori (limit 10–1000) dan statistik |
+| `GET /api/history.php?device_id=…&range=1h&limit=60&order=asc` | publik | histori (limit 10–10.000) dan statistik |
 | `GET /api/devices.php` | publik | daftar device serta pembacaan terakhir |
 
 Rentang API history: `1h`, `6h`, `24h`, `7d`, atau `all`; `order` hanya `asc` atau `desc`. `latest.php` menyembunyikan `ip_address` kecuali sesi admin aktif. Halaman `history.php?action=export_csv` juga hanya menambahkan kolom IP kepada admin.
@@ -191,7 +187,7 @@ Sebelum produksi:
 - Ganti API key placeholder dan password admin. API key hanya dikirim pada header `X-API-Key`, disimpan sebagai hash setelah autentikasi pertama, dan tidak ditampilkan ulang di panel admin.
 - Gunakan HTTPS dengan CA penerbit sertifikat yang benar pada `TLS_ROOT_CA`; firmware tidak lagi menerima URL HTTP atau memakai `setInsecure()`.
 - Batasi asal akses endpoint/API dengan firewall atau jaringan privat bila memungkinkan. Endpoint API memakai `Access-Control-Allow-Origin: *` dan belum menerapkan rate limiting.
-- Pastikan `.htaccess` aktif atau buat aturan Nginx ekuivalen, dan jangan simpan database SQLite atau kredensial di web root tanpa proteksi.
+- Pastikan `.htaccess` aktif atau buat aturan Nginx ekuivalen, dan jangan simpan kredensial di web root tanpa proteksi.
 - Cadangkan tabel `telemetry`; tidak ada retensi, agregasi, maupun pembersihan otomatis.
 
 ## Batasan yang perlu dipahami
@@ -200,4 +196,4 @@ Sebelum produksi:
 - Status offline adalah hasil hitung dari `last_seen` dan `offline_timeout_seconds`; sistem tidak membuat alarm khusus ketika device kemudian menjadi offline.
 - Dashboard publik dan endpoint GET tidak memerlukan login. API key melindungi ingest, bukan pembacaan data.
 - Kode firmware memakai `WiFiClientSecure` bahkan jika `SERVER_URL` masih `http://`; gunakan URL HTTPS dalam deployment atau sesuaikan klien HTTP secara eksplisit.
-- Berkas `scripts/migrate_to_pgsql.php` ditujukan untuk lingkungan lokalnya saat ini: path SQLite dan kredensial PostgreSQL ditulis tetap. Tinjau serta ubah sebelum menjalankannya.
+- Migrasi dari MySQL lama harus dilakukan sebagai proses ETL/pgloader terpisah; runtime aplikasi ini tidak menyediakan fallback atau koneksi MySQL.

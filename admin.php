@@ -10,6 +10,7 @@ requireAdmin();
 
 $db       = getDB();
 $adminName = htmlspecialchars($_SESSION['admin_name']);
+$offlineTimeout = max(30, (int)getSetting('offline_timeout_seconds', 300));
 $flash     = '';
 $flashType = 'ok';
 
@@ -30,33 +31,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_threshold') {
         $deviceId = trim($_POST['device_id'] ?? 'esp32-ce-001');
         $params = ['temp', 'ph', 'alcohol'];
-        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-
         foreach ($params as $param) {
             $minKey = "min_{$param}";
             $maxKey = "max_{$param}";
             $valMin = isset($_POST[$minKey]) && $_POST[$minKey] !== '' ? (float)$_POST[$minKey] : null;
             $valMax = isset($_POST[$maxKey]) && $_POST[$maxKey] !== '' ? (float)$_POST[$maxKey] : null;
 
-            if ($driver === 'mysql') {
-                $stmt = $db->prepare("
-                    INSERT INTO thresholds (device_id, param, val_min, val_max)
-                    VALUES (?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE val_min = VALUES(val_min), val_max = VALUES(val_max), updated_at = NOW()
-                ");
-            } elseif ($driver === 'pgsql') {
-                $stmt = $db->prepare("
-                    INSERT INTO thresholds (device_id, param, val_min, val_max)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT (device_id, param) DO UPDATE SET val_min = EXCLUDED.val_min, val_max = EXCLUDED.val_max, updated_at = NOW()
-                ");
-            } else {
-                $stmt = $db->prepare("
-                    INSERT INTO thresholds (device_id, param, val_min, val_max)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(device_id, param) DO UPDATE SET val_min = excluded.val_min, val_max = excluded.val_max, updated_at = datetime('now','localtime')
-                ");
-            }
+            $stmt = $db->prepare("INSERT INTO thresholds (device_id, param, val_min, val_max)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (device_id, param) DO UPDATE
+                SET val_min = EXCLUDED.val_min, val_max = EXCLUDED.val_max, updated_at = CURRENT_TIMESTAMP");
             $stmt->execute([$deviceId, $param, $valMin, $valMax]);
         }
         $flash = 'Threshold berhasil disimpan.';
@@ -66,9 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'ack_alarm') {
         $alarmId = (int)($_POST['alarm_id'] ?? 0);
         if ($alarmId > 0) {
-            $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-            $now = ($driver === 'sqlite') ? "datetime('now','localtime')" : "NOW()";
-            $stmt = $db->prepare("UPDATE alarms SET acknowledged = 1, ack_at = {$now} WHERE id = ?");
+        $stmt = $db->prepare("UPDATE alarms SET acknowledged = 1, ack_at = CURRENT_TIMESTAMP WHERE id = ?");
             $stmt->execute([$alarmId]);
             $flash = 'Alarm #' . $alarmId . ' ditandai selesai.';
         }
@@ -76,9 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // --- Ack Semua Alarm ---
     if ($action === 'ack_all') {
-        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-        $now = ($driver === 'sqlite') ? "datetime('now','localtime')" : "NOW()";
-        $db->exec("UPDATE alarms SET acknowledged = 1, ack_at = {$now} WHERE acknowledged = 0");
+        $db->exec("UPDATE alarms SET acknowledged = 1, ack_at = CURRENT_TIMESTAMP WHERE acknowledged = 0");
         $flash = 'Semua alarm aktif ditandai selesai.';
     }
 
@@ -468,6 +448,22 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                     Atur <strong>Rentang Batas Ideal (Threshold)</strong> untuk fermentasi. Rentang ini otomatis tampil di kartu Dashboard Utama dan menjadi acuan alarm otomatis jika nilai sensor melewati batas Min atau Max.
                 </p>
 
+                <div style="border:1px solid var(--glass-border); border-radius:14px; padding:16px; margin-bottom:24px; background:var(--glass-bg);">
+                    <div style="font-size:0.82rem; font-weight:700; color:var(--teal-text); margin-bottom:6px;">Timeout Status Device</div>
+                    <p style="font-size:0.74rem; color:var(--text-muted); line-height:1.5; margin:0 0 12px;">
+                        Device dianggap <strong>OFFLINE</strong> jika tidak ada telemetry selama lebih dari batas ini. Pengaturan ini dipakai bersama oleh Dashboard, Admin, API status, tabel realtime, riwayat, dan notifikasi.
+                    </p>
+                    <form method="POST" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+                        <input type="hidden" name="_action" value="update_settings">
+                        <div class="form-group" style="margin:0; min-width:220px;">
+                            <label class="form-label" for="offline_timeout_seconds">Batas offline (detik)</label>
+                            <input id="offline_timeout_seconds" type="number" name="offline_timeout_seconds" class="form-input" min="30" max="86400" step="1" required value="<?= htmlspecialchars((string)$offlineTimeout) ?>">
+                            <div class="form-hint">Contoh: 300 = 5 menit, 900 = 15 menit.</div>
+                        </div>
+                        <button type="submit" class="glass-btn" style="background:var(--teal); color:var(--accent-on-teal); font-weight:700;">Simpan Timeout</button>
+                    </form>
+                </div>
+
                 <form method="POST">
                     <input type="hidden" name="_action" value="save_threshold">
                     <input type="hidden" name="device_id" value="esp32-ce-001">
@@ -677,7 +673,7 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                         </thead>
                         <tbody>
                             <?php foreach ($devices as $dev): ?>
-                            <tr>
+                            <tr data-device-id="<?= htmlspecialchars($dev['device_id']) ?>">
                                 <td style="font-family:var(--font-mono); font-size:0.78rem; color:var(--teal-text);"><?= htmlspecialchars($dev['device_id']) ?></td>
                                 <td style="font-weight:600; font-size:0.82rem;"><?= htmlspecialchars($dev['device_name']) ?></td>
                                 <td style="font-size:0.78rem; color:var(--text-muted);"><?= htmlspecialchars($dev['location']) ?></td>
@@ -692,14 +688,14 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
                                 <?php 
                                     $devLastSeen = $dev['last_seen'];
                                     $devDiff = $devLastSeen ? (time() - strtotime($devLastSeen)) : null;
-                                    $isDevOnline = ($devDiff !== null && $devDiff <= 30);
+                                    $isDevOnline = ($devDiff !== null && $devDiff <= $offlineTimeout);
                                 ?>
                                 <td>
-                                    <span class="device-status-<?= $isDevOnline ? 'online' : 'offline' ?>">
+                                    <span class="admin-device-status device-status-<?= $isDevOnline ? 'online' : 'offline' ?>">
                                         <?= $isDevOnline ? 'ONLINE' : 'OFFLINE' ?>
                                     </span>
                                 </td>
-                                <td style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted);">
+                                <td class="admin-device-last-seen" style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted);">
                                     <?= $dev['last_seen'] ? htmlspecialchars(formatRelativeTime($dev['last_seen'])) : 'Belum pernah' ?>
                                 </td>
                             </tr>
@@ -807,6 +803,31 @@ $admins = $db->query("SELECT id, username, created_at FROM admins ORDER BY id AS
         // Restore tab from hash
         const initTab = hashMap[location.hash] || 'tab-threshold';
         switchTab(initTab);
+
+        // Sinkronkan status device dan timeout yang sama dengan dashboard/API.
+        async function refreshAdminDeviceStatus() {
+            try {
+                const response = await fetch('api/devices.php', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
+                const payload = await response.json();
+                if (!response.ok || payload.status !== 'ok') return;
+                (payload.devices || []).forEach((device) => {
+                    const row = document.querySelector(`tr[data-device-id="${CSS.escape(device.device_id)}"]`);
+                    if (!row) return;
+                    const status = row.querySelector('.admin-device-status');
+                    const lastSeen = row.querySelector('.admin-device-last-seen');
+                    if (status) {
+                        status.textContent = device.is_online ? 'ONLINE' : 'OFFLINE';
+                        status.classList.toggle('online', device.is_online);
+                        status.classList.toggle('offline', !device.is_online);
+                    }
+                    if (lastSeen) lastSeen.textContent = device.last_seen ? device.relative_time : 'Belum pernah';
+                });
+            } catch (error) {
+                console.warn('Gagal menyinkronkan status device admin:', error);
+            }
+        }
+        refreshAdminDeviceStatus();
+        window.setInterval(refreshAdminDeviceStatus, 10000);
 
         // Auto-focus flash message if present
         const flash = document.querySelector('.flash-ok, .flash-err');

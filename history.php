@@ -63,9 +63,6 @@ $filters = [
 $filterQuery = http_build_query(array_filter($filters, static fn($value) => $value !== ''));
 
 function buildTelemetryFilters(PDO $db, string $deviceId, string $range, string $startDate, string $endDate, string $status): array {
-    $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-    $validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
-    $validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
     $conditions = ['device_id = ?'];
     $params = [$deviceId];
 
@@ -85,8 +82,8 @@ function buildTelemetryFilters(PDO $db, string $deviceId, string $range, string 
         $conditions[] = 'received_at < ?';
         $params[] = (new DateTimeImmutable($endDate . ' 00:00:00'))->modify('+1 day')->format('Y-m-d H:i:s');
     }
-    if ($status === 'valid') $conditions[] = "is_valid = {$validTrue}";
-    if ($status === 'invalid') $conditions[] = "is_valid = {$validFalse}";
+    if ($status === 'valid') $conditions[] = 'is_valid = TRUE';
+    if ($status === 'invalid') $conditions[] = 'is_valid = FALSE';
 
     return [implode(' AND ', $conditions), $params];
 }
@@ -144,10 +141,9 @@ try {
     $devices = [];
 }
 
-// Query Data with date filter (detect active driver: PostgreSQL / MySQL / SQLite)
-$driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-$validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
-$validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
+// Query data dengan filter waktu PostgreSQL.
+$validTrue = 'TRUE';
+$validFalse = 'FALSE';
 $timeCondition = '';
 $params = [$deviceId];
 $rangeHours = ['1h' => 1, '6h' => 6, '24h' => 24, '7d' => 24 * 7];

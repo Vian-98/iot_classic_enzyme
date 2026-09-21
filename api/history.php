@@ -46,9 +46,8 @@ function respond(int $statusCode, string $status, string $message): never {
 $timeCondition = '';
 $params = [$deviceId];
 
-$driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-$validTrue = $driver === 'pgsql' ? 'TRUE' : '1';
-$validFalse = $driver === 'pgsql' ? 'FALSE' : '0';
+$validTrue = 'TRUE';
+$validFalse = 'FALSE';
 
 if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
     respond(400, 'error', 'start_date harus berformat YYYY-MM-DD');

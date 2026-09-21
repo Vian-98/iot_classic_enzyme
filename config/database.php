@@ -99,6 +99,7 @@ function ensureSecuritySchema(PDO $pdo): void {
         );");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_rate_limits_scope_blocked ON ingest_rate_limits(scope, blocked_until);
                 CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_telemetry_device_time ON telemetry(device_id, received_at DESC, id DESC);
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_telemetry_replay ON telemetry(device_id, boot_id, request_sequence);");
 }
 

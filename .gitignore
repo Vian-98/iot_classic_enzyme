@@ -30,3 +30,4 @@ firmware/esp32_classic_enzyme/secrets.h
 
 # Node (if ever added)
 node_modules/
+firmware/esp32_classic_enzyme/secrets.backup.vps-pribadi.h

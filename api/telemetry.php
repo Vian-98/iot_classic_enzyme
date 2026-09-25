@@ -89,7 +89,7 @@ $bootId = trim((string)($data['boot_id'] ?? ''));
 $sequence = isset($data['sequence']) && is_numeric($data['sequence']) ? (int)$data['sequence'] : null;
 
 if ($protocolVersion >= 2) {
-    if ($deviceTs === null || abs(time() - $deviceTs) > 300) {
+    if ($deviceTs === null || abs(time() - $deviceTs) > 900) {
         recordSecurityEvent($db, 'stale_timestamp', $deviceId, $sourceIp, 'Timestamp telemetri di luar toleransi');
         respond(422, 'error', 'Timestamp perangkat tidak valid');
     }

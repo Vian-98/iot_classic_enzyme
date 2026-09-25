@@ -119,20 +119,167 @@ DB_PASS=password_rahasia
 DB_AUTO_INIT_SCHEMA=false
 ```
 
-Untuk produksi, buat database PostgreSQL kosong, bootstrap dengan `DB_AUTO_INIT_SCHEMA=true`, uji seluruh endpoint, lalu ubah ke `false`. Jangan mengaktifkan fallback database.
+### Panduan Deploy VPS Produksi (Nginx + PHP-FPM + PostgreSQL)
 
-Letakkan isi folder `IOT` sebagai document root/subdomain. Konfigurasi `.htaccess` memblokir akses browser ke `config/`, `db/`, dan sejumlah ekstensi sensitif pada Apache. Pada Nginx, aturan setara harus dibuat di konfigurasi server; `.htaccess` tidak dibaca Nginx.
+Target URL produksi: `https://puslitkomoditas-strategis.unila.ac.id/iot/`  
+Arsitektur: Subpath `/iot/` pada domain kampus yang sudah ada, tanpa mengganggu aplikasi utama di root `/`.
+
+#### 1. Persiapan Database PostgreSQL
+PostgreSQL hanya perlu listen di `127.0.0.1` (tidak perlu membuka port 5432 ke publik). Buat database dan role terpisah:
+
+```bash
+sudo -u postgres psql
+```
+Di dalam prompt PostgreSQL:
+```sql
+CREATE ROLE classic_enzyme LOGIN PASSWORD 'PASSWORD_DATABASE_KUAT';
+CREATE DATABASE classic_enzyme_iot OWNER classic_enzyme;
+\q
+```
+
+#### 2. Penempatan Kode & Hak Akses
+Salin isi folder `IOT` ke direktori web server (misalnya `/var/www/iot_classic_enzyme/IOT`):
+
+```bash
+sudo mkdir -p /var/www/iot_classic_enzyme
+# Salin folder IOT ke /var/www/iot_classic_enzyme/IOT
+
+# Atur kepemilikan dan hak akses:
+sudo chown -R www-data:www-data /var/www/iot_classic_enzyme/IOT
+sudo find /var/www/iot_classic_enzyme/IOT -type d -exec chmod 755 {} \;
+sudo find /var/www/iot_classic_enzyme/IOT -type f -exec chmod 644 {} \;
+```
+
+#### 3. Inisialisasi (Bootstrap) Schema Database
+Jalankan satu kali script bootstrap schema via PHP CLI menggunakan user `www-data`:
+
+```bash
+cd /var/www/iot_classic_enzyme/IOT
+sudo -u www-data env \
+  DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=classic_enzyme_iot \
+  DB_USER=classic_enzyme DB_PASS='PASSWORD_DATABASE_KUAT' \
+  DB_AUTO_INIT_SCHEMA=true \
+  php -r 'require "config/database.php"; getDB(); echo "Schema berhasil dibuat!\n";'
+```
+*Pastikan tabel `devices`, `telemetry`, `alarms`, `thresholds`, `settings`, `admins`, `security_events`, dan `ingest_rate_limits` terbentuk di PostgreSQL.*
+
+#### 4. Konfigurasi Environment di PHP-FPM
+Agar password database aman dan tidak disimpan di web root, masukkan environment variable langsung ke konfigurasi pool PHP-FPM (misal `/etc/php/8.2/fpm/pool.d/www.conf`):
+
+```ini
+env[DB_HOST] = 127.0.0.1
+env[DB_PORT] = 5432
+env[DB_NAME] = classic_enzyme_iot
+env[DB_USER] = classic_enzyme
+env[DB_PASS] = PASSWORD_DATABASE_KUAT
+env[DB_AUTO_INIT_SCHEMA] = false
+```
+
+Reload/restart PHP-FPM setelah menyimpan perubahan:
+```bash
+sudo systemctl restart php8.2-fpm
+```
+
+Verifikasi koneksi sebagai `www-data`:
+```bash
+sudo -u www-data php -r 'require "/var/www/iot_classic_enzyme/IOT/config/database.php"; $db=getDB(); echo "Driver: " . $db->getAttribute(PDO::ATTR_DRIVER_NAME) . "\n";'
+```
+
+#### 5. Konfigurasi Nginx untuk Subpath `/iot/`
+Tambahkan blok routing berikut ke dalam server block domain kampus yang sudah ada (misal di `/etc/nginx/sites-available/...`):
+
+```nginx
+# Routing direktori statis dan web UI Classic Enzyme IoT
+location ^~ /iot/ {
+    alias /var/www/iot_classic_enzyme/IOT/;
+    index index.php;
+    try_files $uri $uri/ /iot/index.php?$query_string;
+
+    # Blokir akses langsung ke folder sensitif
+    location ^~ /iot/config/ {
+        deny all;
+        return 404;
+    }
+}
+
+# Eksekusi PHP untuk subpath /iot/
+location ~ ^/iot/(.+\.php)$ {
+    alias /var/www/iot_classic_enzyme/IOT/$1;
+    include snippets/fastcgi-php.conf;
+    fastcgi_param SCRIPT_FILENAME /var/www/iot_classic_enzyme/IOT/$1;
+    fastcgi_pass unix:/run/php/php8.2-fpm.sock; # Sesuaikan versi PHP
+}
+```
+
+Uji dan reload Nginx:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+#### 6. Registrasi Device & Pembuatan API Key
+Buat API key yang kuat dan acak menggunakan OpenSSL:
+
+```bash
+openssl rand -hex 32
+```
+
+Daftarkan/perbarui key untuk device di database PostgreSQL:
+```bash
+sudo -u postgres psql -d classic_enzyme_iot -c "
+UPDATE devices SET api_key = 'HASIL_KEY_RANDOM_DI_ATAS' WHERE device_id = 'esp32-ce-001';
+"
+```
+*(Gunakan key ini juga nanti di file `secrets.h` firmware ESP32).*
+
+#### 7. Pengujian Endpoint Telemetry (Smoke Test)
+Sebelum mem-flash firmware fisik, uji penerimaan data menggunakan `curl`:
+
+```bash
+NOW=$(date +%s)
+curl -i -X POST 'https://puslitkomoditas-strategis.unila.ac.id/iot/api/telemetry.php' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: HASIL_KEY_RANDOM_DI_ATAS' \
+  -d "{\"device_id\":\"esp32-ce-001\",\"temperature\":35.4,\"rssi\":-60,\"firmware\":\"2.0.0\",\"protocol_version\":2,\"ts\":${NOW},\"boot_id\":\"0123456789abcdef0123456789abcdef\",\"sequence\":1}"
+```
+*Respons sukses mengembalikan JSON `{"status":"ok",...}` dan data langsung tampil di dashboard `https://puslitkomoditas-strategis.unila.ac.id/iot/`.*
+
+### Data dan Informasi yang Perlu Diambil / Dicatat dari VPS
+
+Sebelum beralih ke laptop/Arduino untuk mem-flash ESP32, berikut data dari VPS yang perlu diambil atau dicatat:
+
+| Data / Info dari VPS | Perintah / Lokasi di VPS | Tujuan / Penggunaan |
+|---|---|---|
+| **1. Sertifikat Root CA SSL** | `openssl s_client -showcerts -connect puslitkomoditas-strategis.unila.ac.id:443 </dev/null 2>/dev/null \| openssl x509 -outform PEM` | Ditempel ke `secrets.h` (`TLS_ROOT_CA`) ESP32 untuk verifikasi TLS/HTTPS aman. |
+| **2. API Key Device** | Hasil generate `openssl rand -hex 32` | Disalin ke `secrets.h` (`API_KEY`) ESP32 agar cocok dengan database server. |
+| **3. Path Socket PHP-FPM** | `ls /run/php/php*-fpm.sock` | Untuk memastikan path `fastcgi_pass` di konfigurasi Nginx VPS sesuai (misal `/run/php/php8.2-fpm.sock`). |
+| **4. User Web Server** | `ps aux \| grep -E 'nginx\|php-fpm' \| awk '{print $1}' \| sort -u` | Memastikan permission direktori kode (`www-data`). |
+| **5. Backup Database Lama** *(opsional)* | `mysqldump -u root -p database_lama > /var/backups/backup_lama.sql` | Disimpan sebelum server beralih penuh ke PostgreSQL. |
+
+#### Cara Ekstrak Root CA untuk ESP32
+Jalankan perintah ini di terminal (laptop atau VPS) untuk mendapatkan sertifikat PEM domain:
+```bash
+openssl s_client -showcerts -connect puslitkomoditas-strategis.unila.ac.id:443 </dev/null 2>/dev/null | openssl x509 -outform PEM
+```
+Salin blok teks mulai dari `-----BEGIN CERTIFICATE-----` sampai `-----END CERTIFICATE-----` ke konstanta `TLS_ROOT_CA` di `secrets.h`.
 
 ## Firmware ESP32
 
-Salin `firmware/esp32_classic_enzyme/secrets.example.h` menjadi `secrets.h`, lalu isi konfigurasi lokal sebelum firmware di-flash. File `secrets.h` diabaikan Git dan ESP32 tetap konek/reconnect Wi-Fi otomatis saat boot:
+Salin `firmware/esp32_classic_enzyme/secrets.example.h` menjadi `secrets.h`, lalu isi konfigurasi yang telah diambil dari langkah deploy VPS di atas sebelum firmware di-flash. File `secrets.h` diabaikan Git dan ESP32 tetap konek/reconnect Wi-Fi otomatis saat boot:
 
 ```cpp
 constexpr char WIFI_SSID[] = "NAMA_WIFI";
 constexpr char WIFI_PASSWORD[] = "PASSWORD_WIFI";
-constexpr char SERVER_URL[] = "https://IP_PUBLIK_VPS_ANDA/api/telemetry.php";
+constexpr char SERVER_URL[] = "https://puslitkomoditas-strategis.unila.ac.id/iot/api/telemetry.php";
 constexpr char DEVICE_ID[] = "esp32-ce-001";
-constexpr char API_KEY[] = "API_KEY_UNIK_DEVICE";
+constexpr char API_KEY[] = "HASIL_KEY_RANDOM_DARI_VPS";
+
+// Sertifikat Root CA yang diekstrak dari server (jangan gunakan setInsecure)
+constexpr char TLS_ROOT_CA[] = R"PEM(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+... (tempel seluruh isi sertifikat PEM domain di sini) ...
+-----END CERTIFICATE-----
+)PEM";
 ```
 
 | Sensor | Pin ESP32 | Catatan |

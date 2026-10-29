@@ -34,13 +34,64 @@
 #include "secrets.h"
 
 // ==============================================================================
-// 1. KONFIGURASI JARINGAN & SERVER BACKEND
+// 1. DATA STRUCTURES & ENDPOINT CONFIGURATIONS
 // ==============================================================================
 
-const char* FIRMWARE_VERSION = "2.0.0";
+struct TelemetrySample {
+  float    temperature;   // NAN jika sensor mati / off / di luar rentang
+  float    ph;            // NAN jika sensor mati / off / di luar rentang
+  int      alcohol;       // raw ADC (-1 jika sensor mati / off / di luar rentang)
+  float    alcoholPpm;    // -1.0f jika sensor mati / off / di luar rentang
+  int      rssi;
+  time_t   ts;
+  uint32_t sequence;
+  char     bootId[33];
+};
+
+struct EndpointConfig {
+  const char* name;
+  const char* url;
+  const char* apiKey;
+  const char* apiKeyHeader;
+  const char* apiKeyPrefix;
+  const char* caCert;
+  bool        enabled;
+};
+
+// Konfigurasi Endpoint Primary (Backend Utama Classic Enzyme - Production)
+static const EndpointConfig PRIMARY_ENDPOINT = {
+  "primary",
+  SERVER_URL,
+  API_KEY,
+  "X-API-Key",
+  "",              // Primary tidak memakai prefix pada header auth
+  TLS_ROOT_CA,
+  true
+};
+
+// Konfigurasi Endpoint Secondary (Server Uji Milik Sendiri)
+// Server secondary menggunakan format payload dan autentikasi yang sama
+// dengan primary (api/telemetry.php yang identik), sehingga API_KEY_HEADER_2
+// dan API_KEY_PREFIX_2 mengikuti konvensi yang sama: "X-API-Key" tanpa prefix.
+static const EndpointConfig SECONDARY_ENDPOINT = {
+  "secondary",
+  SERVER_URL_2,
+  API_KEY_2,
+  API_KEY_HEADER_2,
+  API_KEY_PREFIX_2,
+  TLS_ROOT_CA_2,
+  SECONDARY_ENDPOINT_ENABLED
+};
+
+// ==============================================================================
+// 2. KONFIGURASI JARINGAN & SERVER BACKEND
+// ==============================================================================
+
+const char* FIRMWARE_VERSION = "2.2.0";
 
 // Interval Pengiriman Data (dalam milidetik: 5000 ms = 5 detik atau 5UL * 60UL * 1000UL = 5 menit)
 const unsigned long SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
+
 
 // ==============================================================================
 // 2. STATUS HARDWARE SENSOR (HANYA SENSOR TERPASANG YANG DIKIRIM)
@@ -74,6 +125,16 @@ const int PIN_LED_BUILTIN = 2;
 // ==============================================================================
 const float PH_7_VOLTAGE = 1.65; // Volt pada larutan kalibrasi pH 7.0
 const float PH_SLOPE     = 0.18; // Volt per unit pH
+
+// ==============================================================================
+// Kalibrasi MQ-3 (Alkohol - Ethanol)
+// Baseline udara bersih dihitung dari stabilisasi warm-up (R0 = 160.0)
+// ==============================================================================
+const float MQ3_R0      = 160.0f;
+const float MQ3_CURVE_A = 0.3934f;
+const float MQ3_CURVE_B = -1.504f;
+const float MQ3_PPM_MIN = 10.0f;
+const float MQ3_PPM_MAX = 10000.0f;
 
 // ==============================================================================
 // 5. VARIABEL GLOBAL
@@ -142,6 +203,27 @@ int readMQ3() {
     delay(5);
   }
   return (int)(total / SAMPLES);
+}
+
+/**
+ * Menghitung konsentrasi etanol (ppm) dari pembacaan ADC MQ-3
+ * Menggunakan kurva power: ppm = A * (Rs/R0)^B
+ */
+float readMQ3_ppm(int rawAdc = -1) {
+  if (rawAdc < 0) {
+    rawAdc = readMQ3();
+  }
+  if (rawAdc <= 0 || rawAdc > 4095) return -1.0f;
+  if (MQ3_R0 <= 0.0f) return -1.0f;
+
+  float rs_r0_ratio = (float)rawAdc / MQ3_R0;
+  if (rs_r0_ratio < 0.1f) return -1.0f;
+
+  float ppm = MQ3_CURVE_A * pow(rs_r0_ratio, MQ3_CURVE_B);
+
+  if (ppm < MQ3_PPM_MIN || ppm > MQ3_PPM_MAX) return -1.0f;
+
+  return ppm;
 }
 
 /**
@@ -246,23 +328,180 @@ bool syncClock() {
   return false;
 }
 
-bool isProductionHttpsUrl() {
-  return strncmp(SERVER_URL, "https://", 8) == 0;
+bool isHttpsUrl(const char* url) {
+  return url != nullptr && strncmp(url, "https://", 8) == 0;
 }
 
 // ==============================================================================
-// 9. PENGIRIMAN DATA TELEMETRI VIA HTTP POST
+// 10. PEMBENTUKAN PAYLOAD & PENGIRIMAN DUAL ENDPOINT
 // ==============================================================================
-void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
+
+/**
+ * Menyusun payload v2 untuk backend utama Classic Enzyme (SERVER_URL).
+ * Mempertahankan kompatibilitas penuh dengan skema api/telemetry.php.
+ */
+bool buildPrimaryPayload(const TelemetrySample& s, char* out, size_t outSize) {
+  char tempStr[16];
+  if (SENSOR_SUHU_TERPASANG && !isnan(s.temperature)) {
+    snprintf(tempStr, sizeof(tempStr), "%.2f", s.temperature);
+  } else {
+    strcpy(tempStr, "null");
+  }
+
+  char phStr[16];
+  if (SENSOR_PH_TERPASANG && !isnan(s.ph)) {
+    snprintf(phStr, sizeof(phStr), "%.2f", s.ph);
+  } else {
+    strcpy(phStr, "null");
+  }
+
+  char alcoholStr[16];
+  if (SENSOR_ALKOHOL_TERPASANG && s.alcohol >= 0) {
+    snprintf(alcoholStr, sizeof(alcoholStr), "%d", s.alcohol);
+  } else {
+    strcpy(alcoholStr, "null");
+  }
+
+  char alcoholPpmStr[16];
+  if (SENSOR_ALKOHOL_TERPASANG && s.alcoholPpm >= 0) {
+    snprintf(alcoholPpmStr, sizeof(alcoholPpmStr), "%.2f", s.alcoholPpm);
+  } else {
+    strcpy(alcoholPpmStr, "null");
+  }
+
+  int written = snprintf(out, outSize,
+    "{"
+      "\"device_id\":\"%s\","
+      "\"temperature\":%s,"
+      "\"ph\":%s,"
+      "\"alcohol\":%s,"
+      "\"alcohol_ppm\":%s,"
+      "\"raw_temp\":%s,"
+      "\"raw_adc\":%s,"
+      "\"rssi\":%d,"
+      "\"firmware\":\"%s\","
+      "\"protocol_version\":2,"
+      "\"ts\":%lu,"
+      "\"boot_id\":\"%s\","
+      "\"sequence\":%lu"
+    "}",
+    DEVICE_ID,
+    tempStr,
+    phStr,
+    alcoholStr,
+    alcoholPpmStr,
+    tempStr,
+    alcoholStr,
+    s.rssi,
+    FIRMWARE_VERSION,
+    (unsigned long)s.ts,
+    s.bootId,
+    (unsigned long)s.sequence
+  );
+
+  return (written > 0 && (size_t)written < outSize);
+}
+
+/**
+ * Payload untuk server secondary (server uji milik sendiri, SERVER_URL_2).
+ * Menggunakan format v2 yang sama dengan primary karena server secondary
+ * dikontrol penuh dan menggunakan api/telemetry.php yang identik.
+ * Jika di kemudian hari server secondary memakai skema berbeda,
+ * ubah hanya fungsi ini tanpa menyentuh buildPrimaryPayload().
+ */
+bool buildSecondaryPayload(const TelemetrySample& s, char* out, size_t outSize) {
+  // Pakai format payload v2 yang identik dengan primary
+  return buildPrimaryPayload(s, out, outSize);
+}
+
+/**
+ * Mengirim payload JSON ke satu endpoint secara aman (HTTPS TLS tervalidasi).
+ * Dijalankan berurutan agar hanya ada satu client TLS yang hidup pada satu waktu.
+ */
+bool sendToEndpoint(const EndpointConfig& ep, const char* payload) {
+  if (!ep.enabled) {
+    return false;
+  }
+
+  if (!isHttpsUrl(ep.url)) {
+    Serial.printf("[%s] URL wajib HTTPS. Pengiriman dibatalkan.\n", ep.name);
+    return false;
+  }
+
+  if (ep.caCert == nullptr || strlen(ep.caCert) < 10) {
+    Serial.printf("[%s] CA certificate kosong atau tidak valid. Pengiriman dibatalkan.\n", ep.name);
+    return false;
+  }
+
+  unsigned long t0 = millis();
+
+  // Client TLS lokal di dalam fungsi agar hanya satu client TLS hidup pada satu waktu (menghemat RAM)
+  WiFiClientSecure client;
+  client.setCACert(ep.caCert);
+
+  HTTPClient http;
+  Serial.printf("[%s] Mengirim POST ke: %s\n", ep.name, ep.url);
+  http.begin(client, ep.url);
+  http.addHeader("Content-Type", "application/json");
+
+  // Pasang header autentikasi sesuai konfigurasi endpoint
+  if (ep.apiKey != nullptr && strlen(ep.apiKey) > 0 &&
+      ep.apiKeyHeader != nullptr && strlen(ep.apiKeyHeader) > 0) {
+    char authValue[256];
+    const char* prefix = (ep.apiKeyPrefix != nullptr) ? ep.apiKeyPrefix : "";
+    snprintf(authValue, sizeof(authValue), "%s%s", prefix, ep.apiKey);
+    http.addHeader(ep.apiKeyHeader, authValue);
+  }
+
+  http.setTimeout(4000);
+
+  int httpCode = http.POST((uint8_t*)payload, strlen(payload));
+  unsigned long elapsed = millis() - t0;
+
+  bool success = false;
+  if (httpCode > 0) {
+    // Semua kode HTTP 2xx dianggap berhasil
+    success = (httpCode >= 200 && httpCode < 300);
+    Serial.printf("[%s] Respon Server Code: %d (%lu ms)\n", ep.name, httpCode, elapsed);
+
+    String response = http.getString();
+    if (response.length() > 0) {
+      if (response.length() > 256) {
+        response = response.substring(0, 256) + "...";
+      }
+      Serial.printf("[%s] Respon Body: %s\n", ep.name, response.c_str());
+    }
+
+    if (success) {
+      Serial.printf("[%s] [SUCCESS] Data telemetri berhasil diterima!\n", ep.name);
+    } else {
+      Serial.printf("[%s] [WARNING] Server merespon status non-2xx (HTTP %d)\n", ep.name, httpCode);
+    }
+  } else {
+    Serial.printf("[%s] [ERROR] HTTP POST Gagal, Error: %s (%lu ms)\n",
+                  ep.name, http.errorToString(httpCode).c_str(), elapsed);
+  }
+
+  http.end();
+  client.stop();
+
+  return success;
+}
+
+/**
+ * Orkestrator pengiriman telemetri:
+ * 1. Memeriksa koneksi Wi-Fi dan sinkronisasi waktu NTP.
+ * 2. Memvalidasi rentang transport sensor satu kali.
+ * 3. Membentuk satu TelemetrySample dengan sequence dan timestamp bersama.
+ * 4. Mengirimkan ke Primary Endpoint.
+ * 5. Jika Secondary Endpoint diaktifkan, mengirimkan ke Secondary Endpoint.
+ * 6. Mencatat ringkasan status masing-masing endpoint.
+ */
+void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int rssi) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[HTTP] WiFi terputus. Mencoba reconnect...");
     connectWiFi();
     if (WiFi.status() != WL_CONNECTED) return;
-  }
-
-  if (!isProductionHttpsUrl()) {
-    Serial.println("[HTTP] SERVER_URL wajib memakai HTTPS. Pengiriman dibatalkan.");
-    return;
   }
 
   if (!syncClock()) return;
@@ -280,99 +519,65 @@ void sendTelemetryData(float temp, float ph, int alcohol, int rssi) {
   if (alcohol < 0 || alcohol > 4095) {
     if (alcohol > 4095) Serial.println("[SENSOR] ADC MQ-3 di luar rentang (0-4095).");
     alcohol = -1;
+    alcoholPpm = -1.0f;
   }
 
   digitalWrite(PIN_LED_BUILTIN, HIGH);
 
-  // TLS tervalidasi menggunakan CA yang didefinisikan khusus untuk deployment.
-  WiFiClientSecure client;
-  client.setCACert(TLS_ROOT_CA);
+  // Bentuk satu sampel sensor tunggal untuk dipakai oleh kedua endpoint
+  TelemetrySample sample;
+  sample.temperature = temp;
+  sample.ph          = ph;
+  sample.alcohol     = alcohol;
+  sample.alcoholPpm  = alcoholPpm;
+  sample.rssi        = rssi;
+  time(&sample.ts);
+  sample.sequence    = ++telemetrySequence;
+  strncpy(sample.bootId, bootId, sizeof(sample.bootId) - 1);
+  sample.bootId[sizeof(sample.bootId) - 1] = '\0';
 
-  HTTPClient http;
-
-  Serial.printf("[HTTP] Mengirim POST ke: %s\n", SERVER_URL);
-  http.begin(client, SERVER_URL);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-API-Key", API_KEY);
-  http.setTimeout(4000);
-
-  // Buffer string untuk nilai sensor (jika sensor mati/lepas, kirim null secara eksplisit)
-  char tempStr[16];
-  if (SENSOR_SUHU_TERPASANG && !isnan(temp)) {
-    snprintf(tempStr, sizeof(tempStr), "%.2f", temp);
+  // 1. Kirim ke Endpoint Primary
+  bool primaryOk = false;
+  char primaryPayload[512];
+  if (buildPrimaryPayload(sample, primaryPayload, sizeof(primaryPayload))) {
+    Serial.println("[HTTP] Primary Payload JSON:");
+    Serial.println(primaryPayload);
+    primaryOk = sendToEndpoint(PRIMARY_ENDPOINT, primaryPayload);
   } else {
-    strcpy(tempStr, "null");
+    Serial.println("[HTTP] [ERROR] Gagal menyusun payload primary.");
   }
 
-  char phStr[16];
-  if (SENSOR_PH_TERPASANG && !isnan(ph)) {
-    snprintf(phStr, sizeof(phStr), "%.2f", ph);
-  } else {
-    strcpy(phStr, "null");
+  // 2. Kirim ke Endpoint Secondary (jika diaktifkan)
+  bool secondaryOk = false;
+  bool secondarySkip = !SECONDARY_ENDPOINT.enabled;
+
+  if (SECONDARY_ENDPOINT.enabled) {
+    // Jika WiFi terputus saat request primary, coba hubungkan kembali
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[HTTP] WiFi terputus sebelum secondary. Mencoba reconnect...");
+      connectWiFi();
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      char secondaryPayload[512];
+      if (buildSecondaryPayload(sample, secondaryPayload, sizeof(secondaryPayload))) {
+        Serial.println("[HTTP] Secondary Payload JSON:");
+        Serial.println(secondaryPayload);
+        secondaryOk = sendToEndpoint(SECONDARY_ENDPOINT, secondaryPayload);
+      } else {
+        Serial.println("[HTTP] [ERROR] Gagal menyusun payload secondary.");
+      }
+    } else {
+      Serial.println("[HTTP] WiFi tidak tersambung. Secondary dilewati.");
+    }
   }
 
-  char alcoholStr[16];
-  if (SENSOR_ALKOHOL_TERPASANG && alcohol >= 0) {
-    snprintf(alcoholStr, sizeof(alcoholStr), "%d", alcohol);
-  } else {
-    strcpy(alcoholStr, "null");
-  }
-
-  time_t now;
-  time(&now);
-  const uint32_t sequence = ++telemetrySequence;
-
-  // Payload v2: API key hanya di header, timestamp Unix + boot/sequence mencegah replay.
-  char jsonBuffer[448];
-  snprintf(jsonBuffer, sizeof(jsonBuffer),
-    "{"
-      "\"device_id\":\"%s\","
-      "\"temperature\":%s,"
-      "\"ph\":%s,"
-      "\"alcohol\":%s,"
-      "\"raw_temp\":%s,"
-      "\"raw_adc\":%s,"
-      "\"rssi\":%d,"
-      "\"firmware\":\"%s\","
-      "\"protocol_version\":2,"
-      "\"ts\":%lu,"
-      "\"boot_id\":\"%s\","
-      "\"sequence\":%lu"
-    "}",
-    DEVICE_ID,
-    tempStr,
-    phStr,
-    alcoholStr,
-    tempStr,
-    alcoholStr,
-    rssi,
-    FIRMWARE_VERSION,
-    (unsigned long)now,
-    bootId,
-    (unsigned long)sequence
+  // Ringkasan status pengiriman per siklus
+  Serial.printf("[SUMMARY] primary=%s secondary=%s\n\n",
+    primaryOk ? "OK" : "FAIL",
+    secondarySkip ? "SKIP" : (secondaryOk ? "OK" : "FAIL")
   );
 
-  Serial.println("[HTTP] Payload JSON:");
-  Serial.println(jsonBuffer);
-
-  int httpCode = http.POST((uint8_t*)jsonBuffer, strlen(jsonBuffer));
-
-  if (httpCode > 0) {
-    Serial.printf("[HTTP] Respon Server Code: %d\n", httpCode);
-    String response = http.getString();
-    Serial.println("[HTTP] Respon Body:");
-    Serial.println(response);
-
-    if (httpCode == 200 || httpCode == 201) {
-      Serial.println("[SUCCESS] Data telemetri berhasil tercatat!\n");
-    } else {
-      Serial.printf("[WARNING] Server merespon HTTP %d\n\n", httpCode);
-    }
-  } else {
-    Serial.printf("[ERROR] HTTP POST Gagal, Error: %s\n\n", http.errorToString(httpCode).c_str());
-  }
-
-  http.end();
   digitalWrite(PIN_LED_BUILTIN, LOW);
 }
 
@@ -413,9 +618,16 @@ void loop() {
 
     // 3. Alkohol (MQ-3)
     int alcohol = -1;
+    float alcoholPpm = -1.0f;
     if (SENSOR_ALKOHOL_TERPASANG) {
-      alcohol = readMQ3();
+      alcohol    = readMQ3();
+      alcoholPpm = readMQ3_ppm(alcohol);
       Serial.printf("Alkohol (ADC)  : %d\n", alcohol);
+      if (alcoholPpm >= 0) {
+        Serial.printf("Alkohol (ppm)  : %.2f ppm\n", alcoholPpm);
+      } else {
+        Serial.println("Alkohol (ppm)  : [Di luar rentang / tidak valid]");
+      }
     } else {
       Serial.println("Alkohol        : [SENSOR MATI / BELUM DIPASANG]");
     }
@@ -425,7 +637,7 @@ void loop() {
     Serial.printf("WiFi RSSI      : %d dBm\n", rssi);
 
     // 5. Kirimkan ke Web Backend (Sensor yang mati dikirim 'null')
-    sendTelemetryData(temperature, ph, alcohol, rssi);
+    sendTelemetryData(temperature, ph, alcohol, alcoholPpm, rssi);
   }
 
   delay(50);

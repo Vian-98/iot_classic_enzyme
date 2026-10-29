@@ -56,6 +56,7 @@
         <div class="sensor-value-area">
             <span class="sensor-value" id="valAlcohol">--</span>
             <span class="sensor-unit">ADC</span>
+            <span id="valAlcoholPpm" style="font-size:0.92rem; font-weight:700; color:var(--amber-dark, #d97706); margin-left:8px;">-- ppm</span>
         </div>
         <div class="sensor-footer">
             <span>Ambang Batas</span>

@@ -67,6 +67,7 @@ function ensureSecuritySchema(PDO $pdo): void {
     $columnSpecs = [
         'devices' => ['api_key_hash' => 'VARCHAR(255) NULL'],
         'telemetry' => [
+            'alcohol_ppm' => 'NUMERIC(8,2) NULL',
             'boot_id' => 'VARCHAR(64) NULL',
             'request_sequence' => 'BIGINT NULL',
             'is_valid' => 'BOOLEAN NOT NULL DEFAULT TRUE',
@@ -132,6 +133,7 @@ function initPgsqlSchema(PDO $pdo) {
         temperature NUMERIC(5,2) NULL,
         ph NUMERIC(4,2) NULL,
         alcohol NUMERIC(6,2) NULL,
+        alcohol_ppm NUMERIC(8,2) NULL,
         raw_temp NUMERIC(10,2) NULL,
         raw_adc INTEGER NULL,
         rssi INTEGER NULL,
@@ -193,7 +195,8 @@ function initPgsqlSchema(PDO $pdo) {
     INSERT INTO thresholds (device_id, param, val_min, val_max) VALUES
         ('esp32-ce-001', 'temp', 20.0, 40.0),
         ('esp32-ce-001', 'ph', 3.0, 4.5),
-        ('esp32-ce-001', 'alcohol', NULL, 800.0)
+        ('esp32-ce-001', 'alcohol', NULL, 800.0),
+        ('esp32-ce-001', 'alcohol_ppm', NULL, 5000.0)
     ON CONFLICT (device_id, param) DO NOTHING;
 
     INSERT INTO settings (setting_key, setting_value) VALUES

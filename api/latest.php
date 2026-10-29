@@ -51,7 +51,7 @@ try {
 
     // 2. Ambil data telemetri terakhir
     $stmtTel = $db->prepare("
-        SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
+        SELECT id, device_id, temperature, ph, alcohol, alcohol_ppm, raw_temp, raw_adc, 
                rssi, firmware_ver, device_ts, ip_address, received_at, is_valid, validation_flags
         FROM telemetry
         WHERE device_id = ?
@@ -101,9 +101,10 @@ try {
     $stmtThresh = $db->prepare("SELECT param, val_min, val_max FROM thresholds WHERE device_id = ?");
     $stmtThresh->execute([$targetDevId]);
     $thresholdsMap = [
-        'temp'    => ['min' => 20.0, 'max' => 40.0],
-        'ph'      => ['min' => 3.0, 'max' => 4.5],
-        'alcohol' => ['min' => null, 'max' => 800.0]
+        'temp'        => ['min' => 20.0, 'max' => 40.0],
+        'ph'          => ['min' => 3.0, 'max' => 4.5],
+        'alcohol'     => ['min' => null, 'max' => 800.0],
+        'alcohol_ppm' => ['min' => null, 'max' => 5000.0]
     ];
     while ($t = $stmtThresh->fetch()) {
         $thresholdsMap[$t['param']] = [
@@ -136,6 +137,7 @@ try {
             'temperature' => $latestTelemetry['temperature'] !== null ? (float)$latestTelemetry['temperature'] : null,
             'ph' => $latestTelemetry['ph'] !== null ? (float)$latestTelemetry['ph'] : null,
             'alcohol' => $latestTelemetry['alcohol'] !== null ? (float)$latestTelemetry['alcohol'] : null,
+            'alcohol_ppm' => $latestTelemetry['alcohol_ppm'] !== null ? (float)$latestTelemetry['alcohol_ppm'] : null,
             'raw_temp' => $latestTelemetry['raw_temp'] !== null ? (int)$latestTelemetry['raw_temp'] : null,
             'raw_adc' => $latestTelemetry['raw_adc'] !== null ? (int)$latestTelemetry['raw_adc'] : null,
             'rssi' => $latestTelemetry['rssi'] !== null ? (int)$latestTelemetry['rssi'] : null,

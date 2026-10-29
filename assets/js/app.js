@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
         valTemp: document.getElementById('valTemp'),
         valPh: document.getElementById('valPh'),
         valAlcohol: document.getElementById('valAlcohol'),
+        valAlcoholPpm: document.getElementById('valAlcoholPpm'),
         valRssi: document.getElementById('valRssi'),
         valFirmware: document.getElementById('valFirmware'),
         badgeTemp: document.getElementById('badgeTemp'),
@@ -330,6 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pulseOnChange(el.valTemp, '--');
         pulseOnChange(el.valPh, '--');
         pulseOnChange(el.valAlcohol, '--');
+        if (el.valAlcoholPpm) el.valAlcoholPpm.textContent = '-- ppm';
         pulseOnChange(el.valRssi, '--');
         if (el.valFirmware) el.valFirmware.textContent = '—';
 
@@ -463,6 +465,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const newAlcohol = tel.alcohol !== null ? Math.round(tel.alcohol) : '--';
                         pulseOnChange(el.valAlcohol, newAlcohol);
                     }
+                    if (el.valAlcoholPpm) {
+                        const newPpm = (tel.alcohol_ppm !== null && tel.alcohol_ppm !== undefined) 
+                            ? `${parseFloat(tel.alcohol_ppm).toFixed(1)} ppm` 
+                            : '-- ppm';
+                        el.valAlcoholPpm.textContent = newPpm;
+                    }
                     if (el.badgeAlcohol && el.footerAlcohol) {
                         if (tel.alcohol !== null) {
                             const alcVal = tel.alcohol;
@@ -482,7 +490,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             el.badgeAlcohol.className = alcBadgeClass;
                             el.badgeAlcohol.textContent = alcBadgeText;
-                            el.footerAlcohol.textContent = formatThresholdRange(th.alcohol, 'ADC', '≤ 800 ADC');
+                            const ppmThreshStr = (th.alcohol_ppm?.max !== null && th.alcohol_ppm?.max !== undefined) ? ` · ≤ ${th.alcohol_ppm.max} ppm` : '';
+                            el.footerAlcohol.textContent = formatThresholdRange(th.alcohol, 'ADC', '≤ 800 ADC') + ppmThreshStr;
                         } else {
                             el.badgeAlcohol.textContent = 'OFF';
                             el.badgeAlcohol.className = 'sensor-badge badge-slate';
@@ -667,7 +676,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     </td>
                     <td><span style="color:var(--pink-text); font-weight:700;">${isValid && row.temperature !== null ? row.temperature + ' °C' : '--'}</span></td>
                     <td><span style="color:var(--teal-text); font-weight:700;">${isValid && row.ph !== null ? row.ph : '--'}</span></td>
-                    <td><span style="color:var(--amber); font-weight:700;">${isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span></td>
+                    <td>
+                        <span style="color:var(--amber); font-weight:700;">${isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span>
+                        ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<br><small style="color:var(--text-muted); font-size:0.75rem;">${row.alcohol_ppm.toFixed(1)} ppm</small>` : ''}
+                    </td>
                     <td>${isValid && row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
                     <td><span class="sensor-badge ${isValid ? 'badge-teal' : 'badge-pink'}" style="font-size:0.65rem;">${isValid ? 'VALID' : 'INVALID'}</span></td>
                 </tr>
@@ -749,6 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="table-card-metric">
                             <span class="table-card-metric-label">Alkohol</span>
                             <span class="table-card-metric-value alc">${alc}</span>
+                            ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<span style="font-size:0.75rem; color:var(--text-muted);">${row.alcohol_ppm.toFixed(1)} ppm</span>` : ''}
                         </div>
                     </div>
                     <div class="table-card-footer">

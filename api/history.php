@@ -87,7 +87,7 @@ try {
     // Ambil N data PALING BARU terlebih dahulu (DESC), lalu urutkan ASC untuk tampilan grafik kronologis
     $sql = "
         SELECT * FROM (
-            SELECT id, device_id, temperature, ph, alcohol, raw_temp, raw_adc, 
+            SELECT id, device_id, temperature, ph, alcohol, alcohol_ppm, raw_temp, raw_adc, 
                    rssi, firmware_ver, device_ts, ip_address, received_at, is_valid, validation_flags
             FROM telemetry
             WHERE device_id = ? {$timeCondition}
@@ -106,16 +106,19 @@ try {
     $temps = [];
     $phs = [];
     $alcohols = [];
+    $alcoholPpms = [];
 
     foreach ($rows as $r) {
         $isValid = (bool)$r['is_valid'];
-        $temp = $isValid && $r['temperature'] !== null ? (float)$r['temperature'] : null;
-        $ph   = $isValid && $r['ph'] !== null ? (float)$r['ph'] : null;
-        $alc  = $isValid && $r['alcohol'] !== null ? (float)$r['alcohol'] : null;
+        $temp    = $isValid && $r['temperature'] !== null ? (float)$r['temperature'] : null;
+        $ph      = $isValid && $r['ph'] !== null ? (float)$r['ph'] : null;
+        $alc     = $isValid && $r['alcohol'] !== null ? (float)$r['alcohol'] : null;
+        $alcPpm  = $isValid && $r['alcohol_ppm'] !== null ? (float)$r['alcohol_ppm'] : null;
 
         if ($temp !== null) $temps[] = $temp;
         if ($ph !== null) $phs[] = $ph;
         if ($alc !== null) $alcohols[] = $alc;
+        if ($alcPpm !== null) $alcoholPpms[] = $alcPpm;
 
         $records[] = [
             'id' => (int)$r['id'],
@@ -128,6 +131,7 @@ try {
             'temperature' => $temp,
             'ph' => $ph,
             'alcohol' => $alc,
+            'alcohol_ppm' => $alcPpm,
             'rssi' => $r['rssi'] !== null ? (int)$r['rssi'] : null,
             'raw_temp' => $r['raw_temp'] !== null ? (int)$r['raw_temp'] : null,
             'raw_adc' => $r['raw_adc'] !== null ? (int)$r['raw_adc'] : null,
@@ -151,6 +155,11 @@ try {
             'min' => !empty($alcohols) ? min($alcohols) : null,
             'max' => !empty($alcohols) ? max($alcohols) : null,
             'avg' => !empty($alcohols) ? round(array_sum($alcohols) / count($alcohols), 1) : null,
+        ],
+        'alcohol_ppm' => [
+            'min' => !empty($alcoholPpms) ? min($alcoholPpms) : null,
+            'max' => !empty($alcoholPpms) ? max($alcoholPpms) : null,
+            'avg' => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 1) : null,
         ]
     ];
 

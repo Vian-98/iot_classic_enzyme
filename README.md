@@ -262,6 +262,108 @@ openssl s_client -showcerts -connect puslitkomoditas-strategis.unila.ac.id:443 <
 ```
 Salin blok teks mulai dari `-----BEGIN CERTIFICATE-----` sampai `-----END CERTIFICATE-----` ke konstanta `TLS_ROOT_CA` di `secrets.h`.
 
+---
+
+### Prosedur Update Khusus VPS Percobaan / Pribadi (Secondary Endpoint)
+
+> [!IMPORTANT]
+> **Pahami Konteks Dual-Server Sistem Ini:**
+> 1. **Server 1 — Utama Produksi Kampus (`puslitkomoditas-strategis.unila.ac.id/iot/`)**:  
+>    Server ini adalah lingkungan produksi kampus yang **TIDAK diotak-atik** pada tahap ini. Firmware ESP32 v2.2.0 dirancang **100% backward compatible** — field tambahan `alcohol_ppm` pada JSON payload tidak akan merusak atau menyebabkan error pada Server 1.
+> 2. **Server 2 — VPS Percobaan / Server Pribadi (`https://3.25.243.43:8443`)**:  
+>    Server ini dikontrol penuh oleh Anda sebagai lingkungan uji bebas. **Seluruh prosedur update backend, migrasi PostgreSQL, dan pengujian dashboard di bawah ini ditujukan KHUSUS untuk Server 2 ini.**
+
+---
+
+#### 1. Berkas yang Diperbarui di VPS Percobaan
+Salin/sinkronkan berkas-berkas berikut ke direktori web server di VPS percobaan Anda (misal `/var/www/iot/`):
+- `config/database.php` (skema auto-migrasi kolom `alcohol_ppm` & ambang batas default)
+- `api/telemetry.php` (ekstraksi `alcohol_ppm`, validasi fisik, dan penyimpanan ke DB)
+- `api/latest.php` (menampilkan `alcohol_ppm` di JSON endpoint realtime)
+- `api/history.php` (menampilkan `alcohol_ppm` dan statistik min/max/avg ppm)
+- `components/metric_cards.php` (elemen tampilan ppm pada kartu dashboard)
+- `assets/js/app.js` (binding data realtime dan tampilan ppm di tabel/kartu)
+- `history.php` (kolom ppm di ekspor CSV, tabel riwayat, dan mobile card)
+
+#### 2. Cara Unggah / Sinkronkan Berkas ke VPS Percobaan
+Dari terminal laptop Anda:
+
+```bash
+cd "/Users/favian/Proyek /Classic Enzyme"
+
+# Jika menggunakan rsync ke VPS percobaan (IP 3.25.243.43 atau host Anda):
+rsync -avz --exclude 'secrets.h' --exclude '.git' \
+  IOT/ user_vps@3.25.243.43:/var/www/iot/
+
+# Atau jika VPS percobaan Anda menggunakan Git:
+# Di terminal VPS percobaan:
+# cd /var/www/iot && git pull origin main
+```
+
+Pastikan kepemilikan berkas di VPS tetap milik user web server (`www-data`):
+```bash
+sudo chown -R www-data:www-data /var/www/iot
+```
+
+#### 3. Migrasi Skema & Data di PostgreSQL VPS Percobaan
+
+1. **Auto-Migrasi Skema (Zero Downtime)**:  
+   Fungsi `ensureSecuritySchema()` di `config/database.php` akan **otomatis menambahkan kolom `alcohol_ppm NUMERIC(8,2) NULL`** ke tabel `telemetry` di VPS percobaan saat pertama kali web dibuka atau ada request masuk.
+
+2. **Migrasi Data Historis di VPS Percobaan (Retroaktif)**:  
+   Agar data rekaman lama yang ada di database VPS percobaan memiliki nilai ppm, masuk ke PostgreSQL VPS:
+   
+   ```bash
+   sudo -u postgres psql -d classic_enzyme_iot
+   ```
+   Eksekusi query kalkulasi:
+   ```sql
+   UPDATE telemetry
+   SET alcohol_ppm = ROUND(
+       (0.3934 * POWER(CAST(raw_adc AS FLOAT) / 160.0, -1.504))::NUMERIC, 
+       2
+   )
+   WHERE raw_adc IS NOT NULL
+     AND raw_adc > 0
+     AND raw_adc <= 4095
+     AND (CAST(raw_adc AS FLOAT) / 160.0) >= 0.1
+     AND alcohol_ppm IS NULL
+     AND received_at >= '2026-10-24 12:00:00';
+   ```
+
+   Cek hasil pembaruan:
+   ```sql
+   SELECT id, received_at, raw_adc, alcohol_ppm FROM telemetry ORDER BY id DESC LIMIT 5;
+   \q
+   ```
+
+#### 4. Reload Service di VPS Percobaan
+```bash
+sudo systemctl restart php8.2-fpm   # sesuaikan versi PHP jika 8.1 / 8.3
+sudo systemctl reload nginx         # atau apache2 (sesuai webserver VPS port 8443)
+```
+
+#### 5. Uji Coba Endpoint API di VPS Percobaan
+Jalankan pengujian langsung ke endpoint VPS percobaan (port 8443):
+```bash
+# Uji dari terminal (gunakan -k jika memakai self-signed cert di VPS test)
+curl -k -s "https://3.25.243.43:8443/api/latest.php?device_id=esp32-ce-001" | jq .telemetry
+```
+Periksa apakah properti `"alcohol_ppm"` sudah muncul dalam respons JSON:
+```json
+{
+  "id": 1247,
+  "temperature": 32.5,
+  "ph": null,
+  "alcohol": 2450.0,
+  "alcohol_ppm": 0.06,
+  ...
+}
+```
+Buka dashboard VPS percobaan Anda di browser: `https://3.25.243.43:8443/` untuk memastikan tampilan nilai ppm di kartu sensor dan tabel riwayat berfungsi dengan benar.
+
+---
+
 ## Firmware ESP32
 
 Salin `firmware/esp32_classic_enzyme/secrets.example.h` menjadi `secrets.h`, lalu isi konfigurasi yang telah diambil dari langkah deploy VPS di atas sebelum firmware di-flash. File `secrets.h` diabaikan Git dan ESP32 tetap konek/reconnect Wi-Fi otomatis saat boot:
@@ -273,11 +375,26 @@ constexpr char SERVER_URL[] = "https://puslitkomoditas-strategis.unila.ac.id/iot
 constexpr char DEVICE_ID[] = "esp32-ce-001";
 constexpr char API_KEY[] = "HASIL_KEY_RANDOM_DARI_VPS";
 
-// Sertifikat Root CA yang diekstrak dari server (jangan gunakan setInsecure)
+// Sertifikat Root CA yang diekstrak dari server utama (jangan gunakan setInsecure)
 constexpr char TLS_ROOT_CA[] = R"PEM(
 -----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
 ... (tempel seluruh isi sertifikat PEM domain di sini) ...
+-----END CERTIFICATE-----
+)PEM";
+
+// ─── Dual Endpoint (API Pihak Ketiga) ───────────────────────────────────────
+// Set true untuk mengaktifkan pengiriman paralel/independen ke endpoint kedua
+constexpr bool SECONDARY_ENDPOINT_ENABLED = false;
+
+constexpr char SERVER_URL_2[]     = "https://api.pihak-ketiga.example/v1/telemetry";
+constexpr char API_KEY_2[]        = "TOKEN_DARI_PIHAK_KETIGA";
+constexpr char API_KEY_HEADER_2[] = "Authorization";
+constexpr char API_KEY_PREFIX_2[] = "Bearer ";
+
+constexpr char TLS_ROOT_CA_2[] = R"PEM(
+-----BEGIN CERTIFICATE-----
+TEMPEL_CA_PENERBIT_SERTIFIKAT_API_PIHAK_KETIGA
 -----END CERTIFICATE-----
 )PEM";
 ```
@@ -289,22 +406,35 @@ MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
 | pH analog | GPIO 35 | pH; input-only |
 | LED bawaan | GPIO 2 | menyala ketika proses kirim |
 
-Aktifkan sensor hanya setelah terpasang dengan mengubah `SENSOR_*_TERPASANG` menjadi `true`. Sensor nonaktif atau pembacaan MAX6675 invalid dikirim sebagai `null`, dan `null` tidak memicu alarm parameter tersebut. Pembacaan pH memakai kalibrasi linear (`PH_7_VOLTAGE` dan `PH_SLOPE`) yang harus dikalibrasi terhadap probe Anda; nilai MQ-3 saat ini adalah ADC rata-rata 10 sampel, bukan konsentrasi alkohol terkalibrasi/ppm.
+Aktifkan sensor hanya setelah terpasang dengan mengubah `SENSOR_*_TERPASANG` menjadi `true`. Sensor nonaktif atau pembacaan MAX6675 invalid dikirim sebagai `null`, dan `null` tidak memicu alarm parameter tersebut. Pembacaan pH memakai kalibrasi linear (`PH_7_VOLTAGE` dan `PH_SLOPE`) yang harus dikalibrasi terhadap probe Anda. Nilai MQ-3 dikonversi menjadi `alcohol_ppm` pada firmware v2.2.0 menggunakan kurva daya etanol Hanwei ($R_0 = 160.0$, kurva log) dan dikirim bersamaan dengan raw ADC untuk kompatibilitas penuh.
 
-Firmware mengirim setiap 5.000 ms dan mencoba menyambung ulang Wi-Fi sebelum pengiriman. Sebelum telemetri dikirim, firmware menyinkronkan waktu NTP, memverifikasi sertifikat HTTPS dengan `TLS_ROOT_CA`, lalu mengirim timestamp Unix serta `boot_id`/`sequence` untuk anti-replay. Untuk VPS tanpa domain, gunakan URL `https://IP_PUBLIK_VPS/...`, buat sertifikat server dengan IP VPS pada Subject Alternative Name (SAN), lalu isi `TLS_ROOT_CA` dengan CA yang menandatanganinya. Firmware menolak URL non-HTTPS dan menunda kirim bila waktu belum valid. Belum ada antrean flash atau retry persisten ketika internet putus.
+Firmware mengirim setiap interval (`SEND_INTERVAL_MS`, default 5 menit) dan mencoba menyambung ulang Wi-Fi sebelum pengiriman. Sebelum telemetri dikirim, firmware menyinkronkan waktu NTP, memverifikasi sertifikat HTTPS dengan `TLS_ROOT_CA`, lalu mengirim timestamp Unix serta `boot_id`/`sequence` untuk anti-replay.
 
-Payload yang didukung:
+### Fitur Dual Endpoint Telemetry
+
+Firmware mendukung pengiriman satu sampel sensor ke dua endpoint sekaligus secara independen:
+1. **Primary Endpoint (`SERVER_URL`)**: Mengirim payload v2 standar ke backend Classic Enzyme.
+2. **Secondary Endpoint (`SERVER_URL_2`)**: Mengirim payload yang telah disesuaikan melalui fungsi adapter `buildSecondaryPayload()`.
+
+**Karakteristik Operasional:**
+- **Sequential Execution**: Pengiriman dilakukan berurutan (Primary lalu Secondary). Hanya ada **1 client TLS aktif pada satu waktu**, menjaga penggunaan RAM ESP32 tetap aman dan mencegah heap fragmentation.
+- **Failure Isolation**: Kegagalan pada secondary (misal timeout, 4xx, 5xx) **tidak membatalkan atau mengulang primary**. Begitu pula kegagalan primary tidak membatalkan secondary selama Wi-Fi dan waktu masih valid.
+- **Keamanan Ketat**: Kedua endpoint wajib HTTPS dengan validasi root CA terpisah (`TLS_ROOT_CA` dan `TLS_ROOT_CA_2`). Tidak ada `setInsecure()`, dan token tidak dicatat ke log Serial.
+- **Konfigurasi On/Off**: Cukup atur `SECONDARY_ENDPOINT_ENABLED = false` jika ingin menjalankan firmware hanya untuk backend utama.
+
+Payload v2 primary:
 
 ```json
 {
   "device_id": "esp32-ce-001",
   "temperature": 34.75,
   "ph": null,
-  "alcohol": null,
+  "alcohol": 2450,
+  "alcohol_ppm": 0.06,
   "raw_temp": 34.75,
-  "raw_adc": null,
+  "raw_adc": 2450,
   "rssi": -64,
-  "firmware": "2.0.0",
+  "firmware": "2.2.0",
   "protocol_version": 2,
   "ts": 1760000000,
   "boot_id": "0123456789abcdef0123456789abcdef",

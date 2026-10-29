@@ -106,6 +106,7 @@ $flags = [];
 $temperature = numericTelemetryValue($data, 'temperature', $flags);
 $ph = numericTelemetryValue($data, 'ph', $flags);
 $alcohol = numericTelemetryValue($data, 'alcohol', $flags);
+$alcoholPpm = numericTelemetryValue($data, 'alcohol_ppm', $flags);
 $rawTemp = numericTelemetryValue($data, 'raw_temp', $flags);
 $rawAdc = numericTelemetryValue($data, 'raw_adc', $flags);
 $rssi = numericTelemetryValue($data, 'rssi', $flags);
@@ -113,6 +114,7 @@ $rssi = numericTelemetryValue($data, 'rssi', $flags);
 if ($temperature !== null && ($temperature < 0 || $temperature > 100)) $flags[] = 'temperature_out_of_physical_range';
 if ($ph !== null && ($ph < 0 || $ph > 14)) $flags[] = 'ph_out_of_physical_range';
 if ($alcohol !== null && ($alcohol < 0 || $alcohol > 4095)) $flags[] = 'alcohol_out_of_physical_range';
+if ($alcoholPpm !== null && ($alcoholPpm < 0 || $alcoholPpm > 10000)) $flags[] = 'alcohol_ppm_out_of_range';
 if ($rawAdc !== null && ($rawAdc < 0 || $rawAdc > 4095)) $flags[] = 'raw_adc_out_of_range';
 if ($rssi !== null && ($rssi < -120 || $rssi > 0)) $flags[] = 'rssi_out_of_range';
 
@@ -124,12 +126,12 @@ $validationFlags = $isValid ? null : json_encode(array_values(array_unique($flag
 try {
     $db->beginTransaction();
     $stmtInsert = $db->prepare('INSERT INTO telemetry (
-        device_id, temperature, ph, alcohol, raw_temp, raw_adc, rssi,
+        device_id, temperature, ph, alcohol, alcohol_ppm, raw_temp, raw_adc, rssi,
         firmware_ver, device_ts, ip_address, received_at, boot_id,
         request_sequence, is_valid, validation_flags
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     $stmtInsert->execute([
-        $deviceId, $temperature, $ph, $alcohol, $rawTemp, $rawAdc, $rssi,
+        $deviceId, $temperature, $ph, $alcohol, $alcoholPpm, $rawTemp, $rawAdc, $rssi,
         $firmwareVer, $deviceTs, $sourceIp, $serverTime, $bootId,
         $sequence, $isValid ? 1 : 0, $validationFlags,
     ]);
@@ -138,7 +140,7 @@ try {
     $stmtUpdateDev = $db->prepare("UPDATE devices SET status = 'online', last_seen = ? WHERE device_id = ?");
     $stmtUpdateDev->execute([$serverTime, $deviceId]);
 
-    $alarmsTriggered = $isValid ? evaluateAlarms($db, $deviceId, $temperature, $ph, $alcohol, $serverTime) : [];
+    $alarmsTriggered = $isValid ? evaluateAlarms($db, $deviceId, $temperature, $ph, $alcohol, $alcoholPpm, $serverTime) : [];
     $db->commit();
 
     respond(200, 'ok', 'Telemetry received successfully', [
@@ -167,7 +169,7 @@ function numericTelemetryValue(array $data, string $key, array &$flags): ?float 
     return (float)$data[$key];
 }
 
-function evaluateAlarms(PDO $db, string $deviceId, ?float $temperature, ?float $ph, ?float $alcohol, string $serverTime): array {
+function evaluateAlarms(PDO $db, string $deviceId, ?float $temperature, ?float $ph, ?float $alcohol, ?float $alcoholPpm, string $serverTime): array {
     $stmt = $db->prepare('SELECT param, val_min, val_max FROM thresholds WHERE device_id = ?');
     $stmt->execute([$deviceId]);
     $thresholds = [];
@@ -177,6 +179,7 @@ function evaluateAlarms(PDO $db, string $deviceId, ?float $temperature, ?float $
         ['temp', $temperature, 'Suhu fermentasi', '°C', 'critical'],
         ['ph', $ph, 'Nilai pH', '', 'warning'],
         ['alcohol', $alcohol, 'Konsentrasi alkohol ADC', '', 'warning'],
+        ['alcohol_ppm', $alcoholPpm, 'Konsentrasi alkohol', ' ppm', 'warning'],
     ];
     $alarms = [];
     foreach ($checks as [$param, $actual, $label, $unit, $severity]) {

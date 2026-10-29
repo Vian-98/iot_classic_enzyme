@@ -17,3 +17,23 @@ constexpr char TLS_ROOT_CA[] = R"PEM(
 TEMPel_CA_PENERBIT_SERTIFIKAT_SERVER_DI_SINI
 -----END CERTIFICATE-----
 )PEM";
+
+// ==============================================================================
+// KONFIGURASI ENDPOINT KEDUA (API Pihak Ketiga) - Opsional
+// ==============================================================================
+// Set 'true' jika ingin mengaktifkan pengiriman data ke server uji.
+// Jika 'false', firmware berjalan seperti versi sebelumnya (hanya primary).
+constexpr bool SECONDARY_ENDPOINT_ENABLED = false;
+
+constexpr char SERVER_URL_2[]     = "https://SERVER_UJI_ANDA/iot/api/telemetry.php";
+constexpr char API_KEY_2[]        = "API_KEY_UNTUK_SERVER_UJI";
+// Samakan dengan primary: header "X-API-Key" tanpa prefix
+constexpr char API_KEY_HEADER_2[] = "X-API-Key";
+constexpr char API_KEY_PREFIX_2[] = "";
+
+constexpr char TLS_ROOT_CA_2[] = R"PEM(
+-----BEGIN CERTIFICATE-----
+TEMPEL_CA_PENERBIT_SERTIFIKAT_API_PIHAK_KETIGA
+-----END CERTIFICATE-----
+)PEM";
+

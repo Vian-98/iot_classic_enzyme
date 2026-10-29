@@ -102,7 +102,7 @@ if ($action === 'export_csv') {
     // UTF-8 BOM untuk Microsoft Excel agar kolom rapi otomatis
     fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
-    $headers = ['ID', 'Device ID', 'Waktu Penerimaan', 'Suhu (C)', 'pH', 'Alkohol (ADC)', 'Raw Temp', 'Raw ADC', 'WiFi RSSI', 'Firmware'];
+    $headers = ['ID', 'Device ID', 'Waktu Penerimaan', 'Suhu (C)', 'pH', 'Alkohol (ADC)', 'Alkohol (ppm)', 'Raw Temp', 'Raw ADC', 'WiFi RSSI', 'Firmware'];
     if (isAdminLoggedIn()) {
         $headers[] = 'IP Pengirim';
     }
@@ -120,6 +120,7 @@ if ($action === 'export_csv') {
             $row['temperature'],
             $row['ph'],
             $row['alcohol'],
+            $row['alcohol_ppm'],
             $row['raw_temp'],
             $row['raw_adc'],
             $row['rssi'],
@@ -185,22 +186,26 @@ $records = $stmt->fetchAll();
 
 // Statistik hanya menggunakan pembacaan yang lolos validasi transport.
 $validRecords = array_filter($records, fn($r) => !array_key_exists('is_valid', $r) || (bool)$r['is_valid']);
-$temps    = array_filter(array_column($validRecords, 'temperature'), fn($v) => $v !== null);
-$phs      = array_filter(array_column($validRecords, 'ph'), fn($v) => $v !== null);
-$alcohols = array_filter(array_column($validRecords, 'alcohol'), fn($v) => $v !== null);
+$temps       = array_filter(array_column($validRecords, 'temperature'), fn($v) => $v !== null);
+$phs         = array_filter(array_column($validRecords, 'ph'), fn($v) => $v !== null);
+$alcohols    = array_filter(array_column($validRecords, 'alcohol'), fn($v) => $v !== null);
+$alcoholPpms = array_filter(array_column($validRecords, 'alcohol_ppm'), fn($v) => $v !== null);
 
 $stats = [
     'count'       => $totalRecords,
-    'temp_avg'    => !empty($temps)    ? round(array_sum($temps) / count($temps), 2) : '--',
-    'temp_min'    => !empty($temps)    ? min($temps) : '--',
-    'temp_max'    => !empty($temps)    ? max($temps) : '--',
-    'ph_avg'      => !empty($phs)      ? round(array_sum($phs) / count($phs), 2) : '--',
-    'ph_min'      => !empty($phs)      ? min($phs) : '--',
-    'ph_max'      => !empty($phs)      ? max($phs) : '--',
-    'alc_avg'     => !empty($alcohols) ? round(array_sum($alcohols) / count($alcohols)) : '--',
-    'alc_min'     => !empty($alcohols) ? min($alcohols) : '--',
-    'alc_max'     => !empty($alcohols) ? max($alcohols) : '--',
+    'temp_avg'    => !empty($temps)       ? round(array_sum($temps) / count($temps), 2) : '--',
+    'temp_min'    => !empty($temps)       ? min($temps) : '--',
+    'temp_max'    => !empty($temps)       ? max($temps) : '--',
+    'ph_avg'      => !empty($phs)         ? round(array_sum($phs) / count($phs), 2) : '--',
+    'ph_min'      => !empty($phs)         ? min($phs) : '--',
+    'ph_max'      => !empty($phs)         ? max($phs) : '--',
+    'alc_avg'     => !empty($alcohols)    ? round(array_sum($alcohols) / count($alcohols)) : '--',
+    'alc_min'     => !empty($alcohols)    ? min($alcohols) : '--',
+    'alc_max'     => !empty($alcohols)    ? max($alcohols) : '--',
     'alc_active'  => !empty($alcohols),
+    'ppm_avg'     => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 1) : '--',
+    'ppm_min'     => !empty($alcoholPpms) ? min($alcoholPpms) : '--',
+    'ppm_max'     => !empty($alcoholPpms) ? max($alcoholPpms) : '--',
 ];
 ?>
 <!DOCTYPE html>
@@ -396,11 +401,14 @@ $stats = [
                 <div class="sensor-value-area">
                     <span class="sensor-value" style="color:var(--violet-text);"><?= $stats['alc_avg'] ?></span>
                     <span class="sensor-unit"><?= $stats['alc_active'] ? 'ADC' : '' ?></span>
+                    <?php if ($stats['ppm_avg'] !== '--'): ?>
+                    <span style="font-size:0.85rem; font-weight:600; color:var(--text-muted); margin-left:6px;">(<?= $stats['ppm_avg'] ?> ppm)</span>
+                    <?php endif; ?>
                 </div>
                 <div class="sensor-footer">
                     <?php if ($stats['alc_active']): ?>
-                    <span>Min: <?= $stats['alc_min'] ?></span>
-                    <span>Max: <?= $stats['alc_max'] ?></span>
+                    <span>Min: <?= $stats['alc_min'] ?><?= $stats['ppm_min'] !== '--' ? " ({$stats['ppm_min']} ppm)" : '' ?></span>
+                    <span>Max: <?= $stats['alc_max'] ?><?= $stats['ppm_max'] !== '--' ? " ({$stats['ppm_max']} ppm)" : '' ?></span>
                     <?php else: ?>
                     <span style="color:var(--text-subtle);">Sensor belum terpasang</span>
                     <?php endif; ?>
@@ -466,10 +474,11 @@ $stats = [
                             }
                             $prevTimestampCard = $currentTimestamp;
                             $isValidRecord = !array_key_exists('is_valid', $r) || (bool)$r['is_valid'];
-                            $temp = $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--';
-                            $ph   = $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--';
-                            $alc  = $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--';
-                            $rssi = $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : '--';
+                            $temp   = $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--';
+                            $ph     = $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--';
+                            $alc    = $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--';
+                            $alcPpm = $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 1) . ' ppm' : '--';
+                            $rssi   = $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : '--';
                     ?>
                         <div class="table-card-item data-row">
                             <div class="table-card-header">
@@ -486,8 +495,12 @@ $stats = [
                                     <span class="table-card-metric-value ph"><?= $ph ?></span>
                                 </div>
                                 <div class="table-card-metric">
-                                    <span class="table-card-metric-label">Alkohol</span>
+                                    <span class="table-card-metric-label">Alkohol (ADC)</span>
                                     <span class="table-card-metric-value alc"><?= $alc ?></span>
+                                </div>
+                                <div class="table-card-metric">
+                                    <span class="table-card-metric-label">Alkohol (ppm)</span>
+                                    <span class="table-card-metric-value alc" style="color:var(--amber-dark);"><?= $alcPpm ?></span>
                                 </div>
                             </div>
                             <div class="table-card-footer">
@@ -509,6 +522,7 @@ $stats = [
                             <th>SUHU (MAX6675)</th>
                             <th>PH (PH-110)</th>
                             <th>ALKOHOL (MQ-3)</th>
+                            <th>ALKOHOL (ppm)</th>
                             <th>WIFI RSSI</th>
                             <?php if (isAdminLoggedIn()): ?>
                             <th>IP PENGIRIM</th>
@@ -518,7 +532,7 @@ $stats = [
                     <tbody>
                         <?php if (empty($records)): ?>
                             <tr>
-                                <td colspan="<?= isAdminLoggedIn() ? '8' : '7' ?>" style="text-align: center; color: var(--text-muted); padding: 32px;">
+                                <td colspan="<?= isAdminLoggedIn() ? '9' : '8' ?>" style="text-align: center; color: var(--text-muted); padding: 32px;">
                                     Tidak ada data untuk filter waktu yang dipilih.
                                 </td>
                             </tr>
@@ -534,7 +548,7 @@ $stats = [
                                             $gapHrs = floor($gapSeconds / 3600);
                                             $gapMins = floor(($gapSeconds % 3600) / 60);
                                             $gapLabel = $gapHrs > 0 ? "{$gapHrs} jam {$gapMins} menit" : "{$gapMins} menit";
-                                            $colSpan = isAdminLoggedIn() ? 8 : 7;
+                                            $colSpan = isAdminLoggedIn() ? 9 : 8;
                                             echo "<tr class='downtime-row'>
                                                 <td colspan='{$colSpan}'>
                                                     <div class='downtime-badge'>
@@ -565,6 +579,11 @@ $stats = [
                                     <td>
                                         <span style="color:var(--amber-dark); font-weight:700;">
                                             <?= $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--' ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span style="color:var(--amber-dark); font-weight:700;">
+                                            <?= $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 1) . ' ppm' : '--' ?>
                                         </span>
                                     </td>
                                     <td><?= $isValidRecord && $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : 'INVALID' ?></td>

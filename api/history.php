@@ -159,7 +159,7 @@ try {
         'alcohol_ppm' => [
             'min' => !empty($alcoholPpms) ? min($alcoholPpms) : null,
             'max' => !empty($alcoholPpms) ? max($alcoholPpms) : null,
-            'avg' => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 1) : null,
+            'avg' => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 2) : null,
         ]
     ];
 

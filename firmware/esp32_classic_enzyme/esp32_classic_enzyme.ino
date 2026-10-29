@@ -30,6 +30,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_system.h>
+#include <Preferences.h>
 #include <time.h>
 #include "secrets.h"
 
@@ -100,7 +101,7 @@ const unsigned long SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
 // ==============================================================================
 const bool SENSOR_SUHU_TERPASANG    = true;   // MAX6675 (Sudah dipasang)
 const bool SENSOR_PH_TERPASANG      = false;  // PH-110 (Belum dipasang -> kirim null)
-const bool SENSOR_ALKOHOL_TERPASANG = true;  // MQ-3 (Belum dipasang -> kirim null)
+const bool SENSOR_ALKOHOL_TERPASANG = true;  // MQ-3 (Sudah dipasang)
 
 // ==============================================================================
 // 3. PIN DEFINITIONS
@@ -128,13 +129,30 @@ const float PH_SLOPE     = 0.18; // Volt per unit pH
 
 // ==============================================================================
 // Kalibrasi MQ-3 (Alkohol - Ethanol)
-// Baseline udara bersih dihitung dari stabilisasi warm-up (R0 = 160.0)
+//
+// MQ-3 mengukur Rs (resistansi sensor), bukan ADC mentah:
+//   Vout = rawAdc / MQ3_ADC_MAX * MQ3_VREF
+//   Rs   = (MQ3_VC - Vout) / Vout * RL
+// RL saling menghilangkan saat Rs/R0, jadi cukup menyimpan rasio Rs.
+//
+// R0 = Rs saat sensor berada di udara bersih. Kalibrasi lewat Serial (CAL)
+// dan hasilnya disimpan di NVS. Isi MQ3_R0_RATIO manual jika sudah punya
+// hasil kalibrasi. Pastikan sensor benar-benar di udara bersih saat CAL.
 // ==============================================================================
-const float MQ3_R0      = 160.0f;
-const float MQ3_CURVE_A = 0.3934f;
-const float MQ3_CURVE_B = -1.504f;
-const float MQ3_PPM_MIN = 10.0f;
-const float MQ3_PPM_MAX = 10000.0f;
+const float MQ3_VC         = 5.0f;    // Tegangan suplai modul MQ-3 (Volt)
+const float MQ3_VREF       = 3.3f;    // Referensi ADC ESP32 di pin GPIO34 (Volt)
+const float MQ3_VOUT_SCALE = 1.0f;    // Vout modul per volt di pin (2.0 jika ada pembagi 1:2)
+const float MQ3_ADC_MAX    = 4095.0f; // Resolusi ADC 12-bit
+const float MQ3_CURVE_A  = 0.3934f;
+const float MQ3_CURVE_B  = -1.504f;
+const float MQ3_PPM_MIN  = 1.0f;    // Di bawah ini dianggap di luar rentang ukur
+const float MQ3_PPM_MAX  = 10000.0f;
+
+const float MQ3_R0_RATIO        = 0.0f;  // >0 = pakai kalibrasi manual (Rs/R0)
+const bool  MQ3_AUTO_CALIBRATE  = false; // true = ukur R0 otomatis saat NVS kosong (hanya jika yakin di udara bersih)
+const bool  MQ3_FORCE_RECALIBRATE = false; // true = ukur ulang R0 saat boot
+const int   MQ3_CAL_SAMPLES     = 50;
+const int   MQ3_CAL_DELAY_MS    = 100;
 
 // ==============================================================================
 // 5. VARIABEL GLOBAL
@@ -143,6 +161,8 @@ unsigned long lastSendTime = 0;
 int sendCounter = 0;
 uint32_t telemetrySequence = 0;
 char bootId[33] = {0};
+float mq3R0Ratio = 0.0f; // Rs/R0 di udara bersih, hasil kalibrasi
+Preferences mq3Prefs;
 
 const char* NTP_SERVER_PRIMARY = "pool.ntp.org";
 const char* NTP_SERVER_FALLBACK = "time.google.com";
@@ -206,20 +226,97 @@ int readMQ3() {
 }
 
 /**
- * Menghitung konsentrasi etanol (ppm) dari pembacaan ADC MQ-3
- * Menggunakan kurva power: ppm = A * (Rs/R0)^B
+ * Mengubah ADC menjadi rasio Rs (tanpa RL karena hanya dipakai sebagai rasio).
+ * Mengembalikan -1 jika tegangan di luar rentang yang masuk akal.
+ */
+float mq3RsRatioFromAdc(int rawAdc) {
+  if (rawAdc <= 0 || rawAdc >= (int)MQ3_ADC_MAX) return -1.0f;
+
+  float vout = ((float)rawAdc / MQ3_ADC_MAX) * MQ3_VREF * MQ3_VOUT_SCALE;
+  if (vout <= 0.01f || vout >= (MQ3_VC - 0.01f)) return -1.0f;
+
+  return (MQ3_VC - vout) / vout;
+}
+
+/**
+ * Kalibrasi R0 (Rs di udara bersih). Prioritas: MQ3_R0_RATIO manual,
+ * R0 tersimpan di NVS, lalu pengukuran baru (CAL atau MQ3_AUTO_CALIBRATE).
+ * Mengembalikan true jika R0 tersedia.
+ */
+bool calibrateMQ3(bool forceMeasure = false) {
+  if (!SENSOR_ALKOHOL_TERPASANG) return false;
+
+  if (MQ3_R0_RATIO > 0.0f) {
+    mq3R0Ratio = MQ3_R0_RATIO;
+    Serial.printf("[MQ-3] R0 manual: %.4f\n", mq3R0Ratio);
+    return true;
+  }
+
+  bool mustMeasure = forceMeasure || MQ3_FORCE_RECALIBRATE;
+  if (!mustMeasure) {
+    mq3Prefs.begin("mq3", true);
+    float stored = mq3Prefs.getFloat("r0", 0.0f);
+    mq3Prefs.end();
+    if (stored > 0.0f) {
+      mq3R0Ratio = stored;
+      Serial.printf("[MQ-3] R0 tersimpan (NVS): %.4f\n", mq3R0Ratio);
+      return true;
+    }
+  }
+
+  if (!MQ3_AUTO_CALIBRATE && !mustMeasure) {
+    Serial.println("[MQ-3] Auto-kalibrasi mati dan R0 belum ada; ppm akan null.");
+    return false;
+  }
+
+  Serial.println("[MQ-3] Kalibrasi R0: pastikan sensor di udara bersih...");
+  float sum = 0.0f;
+  float adcSum = 0.0f;
+  int valid = 0;
+  for (int i = 0; i < MQ3_CAL_SAMPLES; i++) {
+    int rawAdc = readMQ3();
+    float ratio = mq3RsRatioFromAdc(rawAdc);
+    if (ratio > 0.0f) {
+      sum += ratio;
+      adcSum += rawAdc;
+      valid++;
+    }
+    delay(MQ3_CAL_DELAY_MS);
+  }
+
+  if (valid < MQ3_CAL_SAMPLES / 2) {
+    Serial.println("[MQ-3] Kalibrasi gagal: pembacaan ADC tidak valid.");
+    return false;
+  }
+
+  mq3R0Ratio = sum / (float)valid;
+  mq3Prefs.begin("mq3", false);
+  mq3Prefs.putFloat("r0", mq3R0Ratio);
+  mq3Prefs.end();
+  Serial.printf("[MQ-3] R0 ratio = %.4f (ADC ~%.0f, %d sampel) tersimpan di NVS\n",
+                mq3R0Ratio, adcSum / (float)valid, valid);
+  return true;
+}
+
+/**
+ * Menghitung konsentrasi etanol (ppm) dari pembacaan ADC MQ-3.
+ * Kurva power Hanwei: ppm = A * (Rs/R0)^B
  */
 float readMQ3_ppm(int rawAdc = -1) {
   if (rawAdc < 0) {
     rawAdc = readMQ3();
   }
-  if (rawAdc <= 0 || rawAdc > 4095) return -1.0f;
-  if (MQ3_R0 <= 0.0f) return -1.0f;
 
-  float rs_r0_ratio = (float)rawAdc / MQ3_R0;
-  if (rs_r0_ratio < 0.1f) return -1.0f;
+  float rsRatio = mq3RsRatioFromAdc(rawAdc);
+  if (rsRatio <= 0.0f) return -1.0f;
 
-  float ppm = MQ3_CURVE_A * pow(rs_r0_ratio, MQ3_CURVE_B);
+  float r0 = (mq3R0Ratio > 0.0f) ? mq3R0Ratio : MQ3_R0_RATIO;
+  if (r0 <= 0.0f) return -1.0f;
+
+  float ratio = rsRatio / r0;
+  if (ratio <= 0.0f) return -1.0f;
+
+  float ppm = MQ3_CURVE_A * pow(ratio, MQ3_CURVE_B);
 
   if (ppm < MQ3_PPM_MIN || ppm > MQ3_PPM_MAX) return -1.0f;
 
@@ -269,6 +366,10 @@ void setup() {
 
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+
+  if (SENSOR_ALKOHOL_TERPASANG) {
+    calibrateMQ3();
+  }
 
   snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
     (unsigned long)esp_random(), (unsigned long)esp_random(),
@@ -582,9 +683,36 @@ void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int 
 }
 
 // ==============================================================================
+// 9b. PERINTAH KALIBRASI VIA SERIAL
+// ==============================================================================
+void handleSerialCommand() {
+  if (!Serial.available()) return;
+
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+  if (cmd.length() == 0) return;
+
+  if (cmd.equalsIgnoreCase("CAL")) {
+    calibrateMQ3(true);
+  } else if (cmd.equalsIgnoreCase("R0")) {
+    Serial.printf("[MQ-3] R0 ratio = %.4f\n", mq3R0Ratio);
+  } else if (cmd.equalsIgnoreCase("RESET")) {
+    mq3Prefs.begin("mq3", false);
+    mq3Prefs.remove("r0");
+    mq3Prefs.end();
+    mq3R0Ratio = 0.0f;
+    Serial.println("[MQ-3] R0 dihapus. Kirim CAL saat sensor di udara bersih.");
+  } else {
+    Serial.println("[CMD] CAL = kalibrasi R0, R0 = lihat nilai, RESET = hapus R0");
+  }
+}
+
+// ==============================================================================
 // 10. LOOP UTAMA
 // ==============================================================================
 void loop() {
+  handleSerialCommand();
+
   unsigned long currentMillis = millis();
 
   if (currentMillis - lastSendTime >= SEND_INTERVAL_MS || lastSendTime == 0) {

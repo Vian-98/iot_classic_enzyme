@@ -1,7 +1,7 @@
 # Rencana Implementasi Dual Endpoint Telemetry ESP32
 
-Status: rencana, belum diimplementasikan  
-Tanggal: 2026-10-23  
+Status: diimplementasikan pada firmware v2.2.0; pengujian lapangan dilakukan bertahap  
+Tanggal: 2026-10-23 (diperbarui 2026-10-29)  
 Cakupan: ESP32 mengirim satu sampel telemetri ke **dua tujuan keluar**:
 
 1. Backend utama Classic Enzyme (`SERVER_URL`).
@@ -290,15 +290,15 @@ Jika API pihak ketiga memakai tanda tangan HMAC, nonce, atau OAuth, buat fungsi 
 
 - [ ] Kontrak API pihak ketiga terdokumentasi.
 - [ ] Mapping payload final.
-- [ ] `secrets.example.h` diperbarui.
-- [ ] `README.md` diperbarui.
-- [ ] Struktur `TelemetrySample` dan `EndpointConfig` ditambahkan.
-- [ ] Payload primary dipisahkan tanpa mengubah format.
-- [ ] Adapter payload secondary dibuat.
-- [ ] `sendToEndpoint()` dibuat dengan TLS per endpoint.
-- [ ] Pengiriman berurutan dan independen diimplementasikan.
-- [ ] Log per endpoint ditambahkan tanpa membocorkan token.
-- [ ] Penanganan 2xx dan error response diuji.
+- [x] `secrets.example.h` diperbarui.
+- [x] `README.md` diperbarui.
+- [x] Struktur `TelemetrySample` dan `EndpointConfig` ditambahkan.
+- [x] Payload primary dipisahkan tanpa mengubah format.
+- [x] Adapter payload secondary dibuat.
+- [x] `sendToEndpoint()` dibuat dengan TLS per endpoint.
+- [x] Pengiriman berurutan dan independen diimplementasikan.
+- [x] Log per endpoint ditambahkan tanpa membocorkan token.
+- [x] Penanganan 2xx dan error response diuji.
 - [ ] Regression test primary lulus.
 - [ ] Negative test lulus.
 - [ ] Soak test heap dan timing lulus.

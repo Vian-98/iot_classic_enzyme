@@ -203,7 +203,7 @@ $stats = [
     'alc_min'     => !empty($alcohols)    ? min($alcohols) : '--',
     'alc_max'     => !empty($alcohols)    ? max($alcohols) : '--',
     'alc_active'  => !empty($alcohols),
-    'ppm_avg'     => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 1) : '--',
+    'ppm_avg'     => !empty($alcoholPpms) ? round(array_sum($alcoholPpms) / count($alcoholPpms), 2) : '--',
     'ppm_min'     => !empty($alcoholPpms) ? min($alcoholPpms) : '--',
     'ppm_max'     => !empty($alcoholPpms) ? max($alcoholPpms) : '--',
 ];
@@ -477,7 +477,7 @@ $stats = [
                             $temp   = $isValidRecord && $r['temperature'] !== null ? htmlspecialchars($r['temperature']) . ' °C' : '--';
                             $ph     = $isValidRecord && $r['ph'] !== null ? htmlspecialchars($r['ph']) : '--';
                             $alc    = $isValidRecord && $r['alcohol'] !== null ? htmlspecialchars($r['alcohol']) : '--';
-                            $alcPpm = $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 1) . ' ppm' : '--';
+                            $alcPpm = $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 2) . ' ppm' : '--';
                             $rssi   = $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : '--';
                     ?>
                         <div class="table-card-item data-row">
@@ -583,7 +583,7 @@ $stats = [
                                     </td>
                                     <td>
                                         <span style="color:var(--amber-dark); font-weight:700;">
-                                            <?= $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 1) . ' ppm' : '--' ?>
+                                            <?= $isValidRecord && $r['alcohol_ppm'] !== null ? number_format($r['alcohol_ppm'], 2) . ' ppm' : '--' ?>
                                         </span>
                                     </td>
                                     <td><?= $isValidRecord && $r['rssi'] !== null ? htmlspecialchars($r['rssi']) . ' dBm' : 'INVALID' ?></td>

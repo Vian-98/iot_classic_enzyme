@@ -111,6 +111,13 @@ $rawTemp = numericTelemetryValue($data, 'raw_temp', $flags);
 $rawAdc = numericTelemetryValue($data, 'raw_adc', $flags);
 $rssi = numericTelemetryValue($data, 'rssi', $flags);
 
+// MQ-3 memiliki batas ukur bawah sekitar 1 ppm. Nilai di bawah itu (termasuk
+// 0.01 dari firmware lama yang memakai rumus ADC/160) disimpan sebagai NULL
+// agar dashboard tidak menampilkan angka yang menyesatkan.
+if ($alcoholPpm !== null && $alcoholPpm < 1.0) {
+    $alcoholPpm = null;
+}
+
 if ($temperature !== null && ($temperature < 0 || $temperature > 100)) $flags[] = 'temperature_out_of_physical_range';
 if ($ph !== null && ($ph < 0 || $ph > 14)) $flags[] = 'ph_out_of_physical_range';
 if ($alcohol !== null && ($alcohol < 0 || $alcohol > 4095)) $flags[] = 'alcohol_out_of_physical_range';

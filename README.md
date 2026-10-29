@@ -4,7 +4,7 @@ Sistem pemantauan fermentasi berbasis ESP32 untuk bioreaktor *Classic Enzyme*. P
 
 Proyek ini sengaja tidak memakai MQTT, Node.js, Composer, atau proses background. Arsitektur tersebut membuatnya mudah dijalankan pada PHP hosting biasa, cPanel, VPS, maupun laptop pengembangan. *Realtime* dicapai melalui polling browser, bukan WebSocket.
 
-> Status implementasi saat ini: firmware mengaktifkan MAX6675 saja secara bawaan. Pembacaan pH dan MQ-3 sudah didukung oleh kode serta skema database, tetapi dinonaktifkan sampai sensor dan kalibrasinya siap.
+> Status implementasi saat ini: firmware mengaktifkan MAX6675 dan MQ-3 secara bawaan. Pembacaan pH sudah didukung kode dan skema database, tetapi dinonaktifkan sampai probe dan kalibrasinya siap.
 
 ## Arsitektur dan aliran data
 
@@ -307,28 +307,30 @@ sudo chown -R www-data:www-data /var/www/iot
 
 #### 3. Migrasi Skema & Data di PostgreSQL VPS Percobaan
 
-1. **Auto-Migrasi Skema (Zero Downtime)**:  
-   Fungsi `ensureSecuritySchema()` di `config/database.php` akan **otomatis menambahkan kolom `alcohol_ppm NUMERIC(8,2) NULL`** ke tabel `telemetry` di VPS percobaan saat pertama kali web dibuka atau ada request masuk.
+1. **Status Skema di Server Ini**:  
+   Kolom `alcohol_ppm NUMERIC(8,2) NULL` sudah ditambahkan. Nilai ppm lama yang dihitung dengan rumus `rawAdc/160` sudah dikosongkan karena tidak valid; nilai baru diisi dari firmware v2.2.0 yang sudah dikalibrasi. Pada VPS ini `DB_AUTO_INIT_SCHEMA` sudah diubah menjadi `false` agar request dashboard tidak menjalankan DDL berulang. Jika melakukan instalasi baru, set sementara ke `true`, buka aplikasi sekali, lalu kembalikan ke `false`.
 
-2. **Migrasi Data Historis di VPS Percobaan (Retroaktif)**:  
-   Agar data rekaman lama yang ada di database VPS percobaan memiliki nilai ppm, masuk ke PostgreSQL VPS:
-   
-   ```bash
-   sudo -u postgres psql -d classic_enzyme_iot
-   ```
-   Eksekusi query kalkulasi:
+2. **Backfill Data Historis (Opsional, Setelah Kalibrasi)**:  
+   Backfill hanya boleh dilakukan setelah nilai `R0` (ADC sensor di udara bersih) diketahui. Ganti `300` pada contoh berikut dengan ADC udara bersih perangkat Anda. Rumusnya memakai `Rs = (Vc - Vout) / Vout * RL`; `RL` saling menghilangkan pada `Rs/R0`.
+
    ```sql
-   UPDATE telemetry
-   SET alcohol_ppm = ROUND(
-       (0.3934 * POWER(CAST(raw_adc AS FLOAT) / 160.0, -1.504))::NUMERIC, 
-       2
+   WITH p AS (
+       SELECT 5.0::float AS vc, 3.3::float AS vref,
+              4095.0::float AS amax, 300.0::float AS r0adc
+   ), r AS (
+       SELECT t.id,
+              (p.vc - (t.raw_adc / p.amax) * p.vref)
+                  / ((t.raw_adc / p.amax) * p.vref) AS rs,
+              (p.vc - (p.r0adc / p.amax) * p.vref)
+                  / ((p.r0adc / p.amax) * p.vref) AS r0
+       FROM telemetry t CROSS JOIN p
+       WHERE t.raw_adc > 0 AND t.raw_adc < 4095 AND t.alcohol_ppm IS NULL
    )
-   WHERE raw_adc IS NOT NULL
-     AND raw_adc > 0
-     AND raw_adc <= 4095
-     AND (CAST(raw_adc AS FLOAT) / 160.0) >= 0.1
-     AND alcohol_ppm IS NULL
-     AND received_at >= '2026-10-24 12:00:00';
+   UPDATE telemetry t
+   SET alcohol_ppm = ROUND((0.3934 * POWER(r.rs / r.r0, -1.504))::NUMERIC, 2)
+   FROM r
+   WHERE t.id = r.id AND r.rs > 0 AND r.r0 > 0
+     AND (0.3934 * POWER(r.rs / r.r0, -1.504)) >= 1.0;
    ```
 
    Cek hasil pembaruan:
@@ -338,9 +340,10 @@ sudo chown -R www-data:www-data /var/www/iot
    ```
 
 #### 4. Reload Service di VPS Percobaan
+Server ini memakai Apache dengan `mod_php` pada port `8443` (bukan PHP-FPM/Nginx untuk aplikasi ini), jadi cukup uji konfigurasi lalu reload Apache:
 ```bash
-sudo systemctl restart php8.2-fpm   # sesuaikan versi PHP jika 8.1 / 8.3
-sudo systemctl reload nginx         # atau apache2 (sesuai webserver VPS port 8443)
+sudo apachectl configtest
+sudo systemctl reload apache2
 ```
 
 #### 5. Uji Coba Endpoint API di VPS Percobaan
@@ -356,7 +359,7 @@ Periksa apakah properti `"alcohol_ppm"` sudah muncul dalam respons JSON:
   "temperature": 32.5,
   "ph": null,
   "alcohol": 2450.0,
-  "alcohol_ppm": 0.06,
+  "alcohol_ppm": 18.30,
   ...
 }
 ```
@@ -406,7 +409,18 @@ TEMPEL_CA_PENERBIT_SERTIFIKAT_API_PIHAK_KETIGA
 | pH analog | GPIO 35 | pH; input-only |
 | LED bawaan | GPIO 2 | menyala ketika proses kirim |
 
-Aktifkan sensor hanya setelah terpasang dengan mengubah `SENSOR_*_TERPASANG` menjadi `true`. Sensor nonaktif atau pembacaan MAX6675 invalid dikirim sebagai `null`, dan `null` tidak memicu alarm parameter tersebut. Pembacaan pH memakai kalibrasi linear (`PH_7_VOLTAGE` dan `PH_SLOPE`) yang harus dikalibrasi terhadap probe Anda. Nilai MQ-3 dikonversi menjadi `alcohol_ppm` pada firmware v2.2.0 menggunakan kurva daya etanol Hanwei ($R_0 = 160.0$, kurva log) dan dikirim bersamaan dengan raw ADC untuk kompatibilitas penuh.
+Aktifkan sensor hanya setelah terpasang dengan mengubah `SENSOR_*_TERPASANG` menjadi `true`. Sensor nonaktif atau pembacaan MAX6675 invalid dikirim sebagai `null`, dan `null` tidak memicu alarm parameter tersebut. Pembacaan pH memakai kalibrasi linear (`PH_7_VOLTAGE` dan `PH_SLOPE`) yang harus dikalibrasi terhadap probe Anda. Nilai MQ-3 dikonversi menjadi `alcohol_ppm` pada firmware v2.2.0 dengan urutan `Vout = ADC / 4095 * MQ3_VREF`, `Rs = (MQ3_VC - Vout) / Vout * RL`, lalu `ppm = 0.3934 * (Rs/R0)^-1.504`. `RL` saling menghilangkan pada rasio, sehingga yang perlu dikalibrasi hanya `R0` (Rs saat sensor di udara bersih). Firmware memakai `R0` yang tersimpan di NVS. Jika belum ada, nilai ppm dikirim `null` sampai Anda melakukan kalibrasi lewat perintah Serial `CAL` saat sensor di udara bersih (lihat bagian Kalibrasi MQ-3), atau mengisi `MQ3_R0_RATIO` secara manual. Sesuaikan `MQ3_VC`, `MQ3_VREF`, dan `MQ3_VOUT_SCALE` dengan rangkaian modul (mis. `MQ3_VOUT_SCALE = 2.0` jika AO melewati pembagi 1:2). Nilai ppm di bawah `1.0` dianggap di luar rentang ukur dan dikirim sebagai `null`; server juga menyimpan nilai di bawah `1.0` sebagai `NULL`.
+
+### Kalibrasi MQ-3 (R0)
+
+Urutan kalibrasi yang disarankan:
+
+1. Nyalakan perangkat dengan sensor MQ-3 di **udara bersih** (bukan di dalam fermenter). Jika NVS belum berisi `R0`, firmware akan mengirim ppm `null`; lanjutkan ke langkah 2.
+2. Jika perangkat sudah terpasang, buka Serial Monitor `115200 baud`, letakkan sensor di udara bersih sampai stabil, lalu kirim perintah `CAL`. Perintah `R0` menampilkan nilai tersimpan, `RESET` menghapusnya.
+3. Setelah `R0` tersimpan, pasang sensor kembali. `R0` tidak hilang saat reboot.
+4. Jika punya hasil kalibrasi manual, isi `MQ3_R0_RATIO` dan set `MQ3_AUTO_CALIBRATE = false`.
+
+Konstanta `MQ3_VC`, `MQ3_VREF`, dan `MQ3_VOUT_SCALE` harus sesuai rangkaian. Pembacaan di luar rentang atau ppm < `1.0` dikirim sebagai `null`, sehingga tidak memicu alarm palsu. Nilai `R0` juga tercetak di Serial dan dapat dipakai untuk backfill historis di README bagian migrasi.
 
 Firmware mengirim setiap interval (`SEND_INTERVAL_MS`, default 5 menit) dan mencoba menyambung ulang Wi-Fi sebelum pengiriman. Sebelum telemetri dikirim, firmware menyinkronkan waktu NTP, memverifikasi sertifikat HTTPS dengan `TLS_ROOT_CA`, lalu mengirim timestamp Unix serta `boot_id`/`sequence` untuk anti-replay.
 
@@ -430,7 +444,7 @@ Payload v2 primary:
   "temperature": 34.75,
   "ph": null,
   "alcohol": 2450,
-  "alcohol_ppm": 0.06,
+  "alcohol_ppm": 18.30,
   "raw_temp": 34.75,
   "raw_adc": 2450,
   "rssi": -64,

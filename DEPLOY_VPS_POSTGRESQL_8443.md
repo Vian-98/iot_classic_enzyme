@@ -2,10 +2,12 @@
 
 Panduan ini memakai Ubuntu, Apache, PostgreSQL, HTTPS langsung melalui IP VPS, dan port aplikasi `8443`.
 
+Kondisi server yang sudah terpasang dan terverifikasi: **Ubuntu 24.04**, **Apache 2.4 + `mod_php` PHP 8.3**, **PostgreSQL 16**, source code di `/var/www/iot`, dan sertifikat IP SAN untuk **3.25.243.43**.
+
 Contoh yang harus diganti:
 
 ```text
-IP VPS: 123.123.123.123
+IP VPS: 3.25.243.43
 App: /var/www/iot
 Database: classic_enzyme_iot
 DB user: classic_enzyme
@@ -91,7 +93,7 @@ sudo nano /etc/apache2/sites-available/classic-enzyme-8443.conf
 
 ```apache
 <VirtualHost *:8443>
-    ServerName 123.123.123.123
+    ServerName 3.25.243.43
     DocumentRoot /var/www/iot
 
     <Directory /var/www/iot>
@@ -115,7 +117,7 @@ sudo nano /etc/apache2/sites-available/classic-enzyme-8443.conf
 </VirtualHost>
 ```
 
-Ganti `ServerName 123.123.123.123` dan `SetEnv DB_PASS PASSWORD_DATABASE_KUAT` dengan nilai nyata. Placeholder yang tertinggal menyebabkan koneksi database gagal.
+Ganti `ServerName 3.25.243.43` dan `SetEnv DB_PASS PASSWORD_DATABASE_KUAT` dengan nilai nyata. Placeholder yang tertinggal menyebabkan koneksi database gagal.
 
 `DB_AUTO_INIT_SCHEMA=true` dipakai hanya saat inisialisasi pertama. Setelah tabel dan indeks berhasil dibuat, ubah menjadi `false` agar request produksi tidak menjalankan DDL berulang. Runtime selalu PostgreSQL dan tidak memiliki fallback database.
 
@@ -123,7 +125,7 @@ Ganti `ServerName 123.123.123.123` dan `SetEnv DB_PASS PASSWORD_DATABASE_KUAT` d
 
 Gunakan **IPv4 publik VPS** dari panel provider VPS (misalnya AWS EC2 **Public IPv4 address**), yaitu IP yang dipakai untuk membuka aplikasi dari internet dan yang nanti ditulis di `SERVER_URL` pada ESP32.
 
-Contoh di bawah memakai `203.0.113.10`. Ganti semua `203.0.113.10` dengan IP publik VPS Anda sendiri.
+Contoh di bawah memakai `3.25.243.43` sesuai server ini. Jika IP publik VPS berubah, ganti semua `3.25.243.43` dengan IP publik yang baru.
 
 Jangan gunakan:
 
@@ -157,10 +159,10 @@ prompt = no
 [req_distinguished_name]
 C = ID
 O = Classic Enzyme
-CN = 203.0.113.10
+CN = 3.25.243.43
 
 [v3_req]
-subjectAltName = IP:203.0.113.10
+subjectAltName = IP:3.25.243.43
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 ```
@@ -408,7 +410,7 @@ sudo systemctl status postgresql
 - Perintah `openssl`, `curl`, atau `tail` error di `psql`: keluar dulu dengan `\q`, lalu jalankan perintah tersebut di shell Linux.
 - TLS gagal di ESP32: CA salah, sertifikat tidak memiliki IP SAN, NTP gagal, atau port `8443` belum dibuka pada firewall VPS/cloud.
 - `409`: kombinasi `boot_id` dan `sequence` sudah pernah diterima.
-- Peringatan `server certificate does NOT include an ID ... 123.123.123.123:443`: ada VirtualHost SSL lama memakai IP contoh. Tidak memblokir port 8443, tetapi ganti `ServerName` placeholder atau nonaktifkan site SSL lama jika memang tidak digunakan.
+- Peringatan `server certificate does NOT include an ID ... 3.25.243.43:443`: ada VirtualHost SSL lama memakai IP contoh. Tidak memblokir port 8443, tetapi ganti `ServerName` placeholder atau nonaktifkan site SSL lama jika memang tidak digunakan.
 
 ## Data lama dari MySQL
 

@@ -467,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (el.valAlcoholPpm) {
                         const newPpm = (tel.alcohol_ppm !== null && tel.alcohol_ppm !== undefined) 
-                            ? `${parseFloat(tel.alcohol_ppm).toFixed(1)} ppm` 
+                            ? `${parseFloat(tel.alcohol_ppm).toFixed(2)} ppm`
                             : '-- ppm';
                         el.valAlcoholPpm.textContent = newPpm;
                     }
@@ -678,7 +678,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td><span style="color:var(--teal-text); font-weight:700;">${isValid && row.ph !== null ? row.ph : '--'}</span></td>
                     <td>
                         <span style="color:var(--amber); font-weight:700;">${isValid && row.alcohol !== null ? Math.round(row.alcohol) + ' ADC' : '--'}</span>
-                        ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<br><small style="color:var(--text-muted); font-size:0.75rem;">${row.alcohol_ppm.toFixed(1)} ppm</small>` : ''}
+                        ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<br><small style="color:var(--text-muted); font-size:0.75rem;">${row.alcohol_ppm.toFixed(2)} ppm</small>` : ''}
                     </td>
                     <td>${isValid && row.rssi !== null ? row.rssi + ' dBm' : '--'}</td>
                     <td><span class="sensor-badge ${isValid ? 'badge-teal' : 'badge-pink'}" style="font-size:0.65rem;">${isValid ? 'VALID' : 'INVALID'}</span></td>
@@ -761,7 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="table-card-metric">
                             <span class="table-card-metric-label">Alkohol</span>
                             <span class="table-card-metric-value alc">${alc}</span>
-                            ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<span style="font-size:0.75rem; color:var(--text-muted);">${row.alcohol_ppm.toFixed(1)} ppm</span>` : ''}
+                            ${isValid && row.alcohol_ppm !== null && row.alcohol_ppm !== undefined ? `<span style="font-size:0.75rem; color:var(--text-muted);">${row.alcohol_ppm.toFixed(2)} ppm</span>` : ''}
                         </div>
                     </div>
                     <div class="table-card-footer">

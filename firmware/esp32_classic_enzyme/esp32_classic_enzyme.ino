@@ -148,7 +148,7 @@ const float MQ3_CURVE_B  = -1.504f;
 const float MQ3_PPM_MIN  = 1.0f;    // Di bawah ini dianggap di luar rentang ukur
 const float MQ3_PPM_MAX  = 10000.0f;
 
-const float MQ3_R0_RATIO        = 0.0f;  // >0 = pakai kalibrasi manual (Rs/R0)
+const float MQ3_R0_RATIO        = 37.78f; // Kalibrasi manual dari baseline ADC 160 (telemetri_pra_pencatatan.csv)
 const bool  MQ3_AUTO_CALIBRATE  = false; // true = ukur R0 otomatis saat NVS kosong (hanya jika yakin di udara bersih)
 const bool  MQ3_FORCE_RECALIBRATE = false; // true = ukur ulang R0 saat boot
 const int   MQ3_CAL_SAMPLES     = 50;

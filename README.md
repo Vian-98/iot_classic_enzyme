@@ -424,17 +424,35 @@ Konstanta `MQ3_VC`, `MQ3_VREF`, dan `MQ3_VOUT_SCALE` harus sesuai rangkaian. Pem
 
 Firmware mengirim setiap interval (`SEND_INTERVAL_MS`, default 5 menit) dan mencoba menyambung ulang Wi-Fi sebelum pengiriman. Sebelum telemetri dikirim, firmware menyinkronkan waktu NTP, memverifikasi sertifikat HTTPS dengan `TLS_ROOT_CA`, lalu mengirim timestamp Unix serta `boot_id`/`sequence` untuk anti-replay.
 
-### Fitur Dual Endpoint Telemetry
+### Fitur Dual Endpoint Telemetry & Ketahanan Jaringan (v2.2.1)
 
-Firmware mendukung pengiriman satu sampel sensor ke dua endpoint sekaligus secara independen:
+Firmware mendukung pengiriman satu sampel sensor ke dua endpoint sekaligus secara independen dengan proteksi ketahanan jaringan:
 1. **Primary Endpoint (`SERVER_URL`)**: Mengirim payload v2 standar ke backend Classic Enzyme.
 2. **Secondary Endpoint (`SERVER_URL_2`)**: Mengirim payload yang telah disesuaikan melalui fungsi adapter `buildSecondaryPayload()`.
 
-**Karakteristik Operasional:**
+**Karakteristik Operasional & Ketahanan Jaringan (v2.2.1):**
 - **Sequential Execution**: Pengiriman dilakukan berurutan (Primary lalu Secondary). Hanya ada **1 client TLS aktif pada satu waktu**, menjaga penggunaan RAM ESP32 tetap aman dan mencegah heap fragmentation.
-- **Failure Isolation**: Kegagalan pada secondary (misal timeout, 4xx, 5xx) **tidak membatalkan atau mengulang primary**. Begitu pula kegagalan primary tidak membatalkan secondary selama Wi-Fi dan waktu masih valid.
+- **Socket Timeout Terkunci (`client.setTimeout(10000)`)**: Membatasi waktu handshake TCP/TLS maksimal 10 detik (10.000 ms). Mencegah ESP32 membeku/hang hingga 120 detik jika terjadi rute packet loss internet.
+- **Kompatibel ESP32 Core 3.x (`NetworkClientSecure`)**: Alokasi buffer TLS dan mbedTLS ditangani secara efisien pada level stack lokal per fungsi, kompatibel dengan core ESP32 v2.x maupun v3.x.
+- **Wi-Fi Radio Selalu Siap (`WiFi.setSleep(false)`)**: Menonaktifkan modem sleep ESP32 agar modul Wi-Fi tidak tertidur selama jeda 5 menit. Transmisi berikutnya langsung tersambung cepat tanpa timeout handshake awal.
+- **Jeda Cooldown Antar-Endpoint (500 ms)**: Memberi waktu bagi stack lwIP FreeRTOS membersihkan PCB TCP dan melepaskan buffer TLS sebelum membuka sesi HTTPS baru.
+- **Retry Otomatis (1 Kali)**: Jika pengiriman ke salah satu endpoint gagal karena fluktuasi jaringan, firmware otomatis melakukan percobaan ulang (*retry*) 1 kali setelah jeda 1,5 detik.
+- **Monitoring Memori Realtime**: Serial Monitor mencetak sisa memori internal (`Free Heap` dan `Max Alloc Block`) pada awal dan akhir siklus untuk deteksi dini kebocoran memori.
+- **Failure Isolation**: Kegagalan pada secondary **tidak membatalkan primary**, dan sebaliknya.
 - **Keamanan Ketat**: Kedua endpoint wajib HTTPS dengan validasi root CA terpisah (`TLS_ROOT_CA` dan `TLS_ROOT_CA_2`). Tidak ada `setInsecure()`, dan token tidak dicatat ke log Serial.
 - **Konfigurasi On/Off**: Cukup atur `SECONDARY_ENDPOINT_ENABLED = false` jika ingin menjalankan firmware hanya untuk backend utama.
+
+#### Panduan Troubleshooting Koneksi (`Error: connection refused`)
+
+Jika pada Serial Monitor muncul pesan:
+```text
+[primary] [ERROR] HTTP POST Gagal, Error: connection refused (5049 ms)
+```
+* **Penyebab:** Pada library `HTTPClient` ESP32, error `-1` (`connection refused`) berdurasi ~5000 ms menandakan **TCP/TLS Connect Timeout**, bukan server menolak request. Ini terjadi saat paket SYN jabat tangan koneksi tidak berbalas dalam 5 detik karena fluktuasi jaringan/ISP atau sinyal Wi-Fi lemah.
+* **Solusi Operasional:**
+  1. Pastikan nilai `WiFi RSSI` lebih baik dari `-65 dBm` (ideal `-40` s.d. `-55 dBm`).
+  2. Jika menggunakan tethering HP, matikan fitur *Battery Saver* / *Power Saving* agar hotspot HP tidak membatasi koneksi di latar belakang saat layar mati.
+  3. Pantau log `[HEAP] Free Heap`. Nilai yang sehat berada di atas `100.000 bytes` dengan `Max Block` di atas `40.000 bytes`.
 
 Payload v2 primary:
 
@@ -448,7 +466,7 @@ Payload v2 primary:
   "raw_temp": 34.75,
   "raw_adc": 2450,
   "rssi": -64,
-  "firmware": "2.2.0",
+  "firmware": "2.2.1",
   "protocol_version": 2,
   "ts": 1760000000,
   "boot_id": "0123456789abcdef0123456789abcdef",

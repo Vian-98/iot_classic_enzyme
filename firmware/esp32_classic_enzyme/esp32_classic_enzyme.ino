@@ -88,7 +88,7 @@ static const EndpointConfig SECONDARY_ENDPOINT = {
 // 2. KONFIGURASI JARINGAN & SERVER BACKEND
 // ==============================================================================
 
-const char* FIRMWARE_VERSION = "2.2.0";
+const char* FIRMWARE_VERSION = "2.2.1";
 
 // Interval Pengiriman Data (dalam milidetik: 5000 ms = 5 detik atau 5UL * 60UL * 1000UL = 5 menit)
 const unsigned long SEND_INTERVAL_MS = 5UL * 60UL * 1000UL;
@@ -395,6 +395,8 @@ void connectWiFi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    // Nonaktifkan modem sleep agar radio Wi-Fi tetap aktif dan tidak sleep selama interval pengiriman
+    WiFi.setSleep(false);
     Serial.println("\n[WiFi] Berhasil Terhubung!");
     Serial.print("[WiFi] IP Address : ");
     Serial.println(WiFi.localIP());
@@ -519,29 +521,22 @@ bool buildSecondaryPayload(const TelemetrySample& s, char* out, size_t outSize) 
  * Mengirim payload JSON ke satu endpoint secara aman (HTTPS TLS tervalidasi).
  * Dijalankan berurutan agar hanya ada satu client TLS yang hidup pada satu waktu.
  */
-bool sendToEndpoint(const EndpointConfig& ep, const char* payload) {
-  if (!ep.enabled) {
-    return false;
-  }
-
-  if (!isHttpsUrl(ep.url)) {
-    Serial.printf("[%s] URL wajib HTTPS. Pengiriman dibatalkan.\n", ep.name);
-    return false;
-  }
-
-  if (ep.caCert == nullptr || strlen(ep.caCert) < 10) {
-    Serial.printf("[%s] CA certificate kosong atau tidak valid. Pengiriman dibatalkan.\n", ep.name);
-    return false;
-  }
-
+static bool sendToEndpointOnce(const EndpointConfig& ep, const char* payload, int attempt, int maxAttempts) {
   unsigned long t0 = millis();
 
   // Client TLS lokal di dalam fungsi agar hanya satu client TLS hidup pada satu waktu (menghemat RAM)
   WiFiClientSecure client;
   client.setCACert(ep.caCert);
+  // Kunci timeout soket TCP/TLS (10.000 ms = 10 detik) agar tidak hang hingga 120 detik jika koneksi drop
+  client.setTimeout(10000);
 
   HTTPClient http;
-  Serial.printf("[%s] Mengirim POST ke: %s\n", ep.name, ep.url);
+  if (attempt == 1) {
+    Serial.printf("[%s] Mengirim POST ke: %s\n", ep.name, ep.url);
+  } else {
+    Serial.printf("[%s] [RETRY %d/%d] Mengirim ulang POST ke: %s\n", ep.name, attempt, maxAttempts, ep.url);
+  }
+
   http.begin(client, ep.url);
   http.addHeader("Content-Type", "application/json");
 
@@ -554,7 +549,7 @@ bool sendToEndpoint(const EndpointConfig& ep, const char* payload) {
     http.addHeader(ep.apiKeyHeader, authValue);
   }
 
-  http.setTimeout(4000);
+  http.setTimeout(8000); // 8 detik read timeout
 
   int httpCode = http.POST((uint8_t*)payload, strlen(payload));
   unsigned long elapsed = millis() - t0;
@@ -589,14 +584,53 @@ bool sendToEndpoint(const EndpointConfig& ep, const char* payload) {
   return success;
 }
 
+bool sendToEndpoint(const EndpointConfig& ep, const char* payload) {
+  if (!ep.enabled) {
+    return false;
+  }
+
+  if (!isHttpsUrl(ep.url)) {
+    Serial.printf("[%s] URL wajib HTTPS. Pengiriman dibatalkan.\n", ep.name);
+    return false;
+  }
+
+  if (ep.caCert == nullptr || strlen(ep.caCert) < 10) {
+    Serial.printf("[%s] CA certificate kosong atau tidak valid. Pengiriman dibatalkan.\n", ep.name);
+    return false;
+  }
+
+  const int MAX_ATTEMPTS = 2; // Coba maksimal 2 kali (1x utama + 1x retry jika koneksi rontok)
+  for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    bool ok = sendToEndpointOnce(ep, payload, attempt, MAX_ATTEMPTS);
+    if (ok) {
+      return true;
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      Serial.printf("[%s] Menunggu jeda 1.5 detik sebelum mencoba kembali...\n", ep.name);
+      delay(1500);
+
+      // Jika status WiFi drop saat request pertama, coba pulihkan
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.printf("[%s] WiFi terputus saat retry, mencoba reconnect...\n", ep.name);
+        connectWiFi();
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * Orkestrator pengiriman telemetri:
  * 1. Memeriksa koneksi Wi-Fi dan sinkronisasi waktu NTP.
  * 2. Memvalidasi rentang transport sensor satu kali.
  * 3. Membentuk satu TelemetrySample dengan sequence dan timestamp bersama.
- * 4. Mengirimkan ke Primary Endpoint.
- * 5. Jika Secondary Endpoint diaktifkan, mengirimkan ke Secondary Endpoint.
- * 6. Mencatat ringkasan status masing-masing endpoint.
+ * 4. Memantau ketersediaan RAM heap bebas (mencegah OOM TLS).
+ * 5. Mengirimkan ke Primary Endpoint.
+ * 6. Cooldown sejenak agar lwIP & TLS buffer bersih.
+ * 7. Jika Secondary Endpoint diaktifkan, mengirimkan ke Secondary Endpoint.
+ * 8. Mencatat ringkasan status masing-masing endpoint dan sisa heap.
  */
 void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int rssi) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -625,6 +659,10 @@ void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int 
 
   digitalWrite(PIN_LED_BUILTIN, HIGH);
 
+  // Pantau ketersediaan RAM heap sebelum proses transmisi
+  Serial.printf("[HEAP] Awal Siklus -> Free: %u bytes | Max Block: %u bytes\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
   // Bentuk satu sampel sensor tunggal untuk dipakai oleh kedua endpoint
   TelemetrySample sample;
   sample.temperature = temp;
@@ -647,6 +685,9 @@ void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int 
   } else {
     Serial.println("[HTTP] [ERROR] Gagal menyusun payload primary.");
   }
+
+  // Berikan jeda cooldown 500 ms agar stack lwIP dan mbedTLS membersihkan socket & buffer
+  delay(500);
 
   // 2. Kirim ke Endpoint Secondary (jika diaktifkan)
   bool secondaryOk = false;
@@ -674,10 +715,12 @@ void sendTelemetryData(float temp, float ph, int alcohol, float alcoholPpm, int 
   }
 
   // Ringkasan status pengiriman per siklus
-  Serial.printf("[SUMMARY] primary=%s secondary=%s\n\n",
+  Serial.printf("[SUMMARY] primary=%s secondary=%s\n",
     primaryOk ? "OK" : "FAIL",
     secondarySkip ? "SKIP" : (secondaryOk ? "OK" : "FAIL")
   );
+  Serial.printf("[HEAP] Selesai Siklus -> Free: %u bytes | Max Block: %u bytes\n\n",
+                ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
   digitalWrite(PIN_LED_BUILTIN, LOW);
 }
